@@ -116,9 +116,15 @@ function AgentMessage({ entry, onApprove, proposalStatuses }: AgentMessageProps)
       );
     case "proposal":
       return (
-        <div className="bubble bubble--agent">
-          New adaptation proposal received: {message.payload.detail}
-        </div>
+        <AdaptationCard
+          message={message}
+          onDecide={(approved) =>
+            onApprove(message.goal_id, message.correlation_id, [
+              { proposal_id: message.payload.proposal_id, approved },
+            ])
+          }
+          status={proposalStatuses[message.payload.proposal_id]}
+        />
       );
   }
 }
@@ -126,9 +132,21 @@ function AgentMessage({ entry, onApprove, proposalStatuses }: AgentMessageProps)
 function StatusBubble({ message }: { message: Extract<UiInboundMessage, { type: "status" }> }) {
   const executed = message.payload.executed ?? [];
   const fallback = message.payload.note || `Status: ${message.task_status}`;
+  const dateLabel = formatStatusDate(message.payload.day, message.payload.sim_date);
+  const isMaterial = message.payload.material === true || executed.length > 0;
 
   return (
-    <div className="bubble bubble--agent status-bubble">
+    <div
+      className={
+        isMaterial
+          ? "bubble bubble--agent status-bubble status-bubble--material"
+          : "bubble bubble--agent status-bubble status-bubble--quiet"
+      }
+    >
+      <div className="status-bubble__topline">
+        <span>{dateLabel || formatTaskStatus(message.task_status)}</span>
+        <strong>{isMaterial ? "updated" : "on track"}</strong>
+      </div>
       {message.payload.note ? <p>{message.payload.note}</p> : null}
       {executed.length > 0 ? (
         <ul>
@@ -145,6 +163,91 @@ function StatusBubble({ message }: { message: Extract<UiInboundMessage, { type: 
   );
 }
 
+function AdaptationCard({
+  message,
+  onDecide,
+  status,
+}: {
+  message: Extract<UiInboundMessage, { type: "proposal" }>;
+  onDecide: (approved: boolean) => void;
+  status: ProposalStatusMap[string] | undefined;
+}) {
+  const decisionSent = Boolean(status);
+
+  return (
+    <article className="adaptation-card">
+      <div className="adaptation-card__header">
+        <div>
+          <p className="eyebrow">Adaptation</p>
+          <h2>Schedule change caught</h2>
+        </div>
+        <span className="adaptation-chip">Judgment needed</span>
+      </div>
+      <div className="adaptation-trigger">
+        <span>Trigger</span>
+        <strong>{message.payload.trigger}</strong>
+      </div>
+      <p>{message.payload.detail}</p>
+      <div className="adaptation-meta">
+        Proposed action: <strong>{formatAction(message.payload.action)}</strong>
+      </div>
+      <div className="plan-actions">
+        <button type="button" onClick={() => onDecide(true)} disabled={decisionSent}>
+          {status?.approved ? "Adapt sent" : "Adapt"}
+        </button>
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={() => onDecide(false)}
+          disabled={decisionSent}
+        >
+          {status && !status.approved ? "Declined" : "Decline"}
+        </button>
+      </div>
+      {status ? (
+        <p
+          className={`adaptation-status adaptation-status--${
+            status.approved ? status.state : "declined"
+          }`}
+        >
+          {formatAdaptationStatus(status)}
+        </p>
+      ) : null}
+    </article>
+  );
+}
+
 function formatAction(action: string) {
   return action.replaceAll("_", " ");
+}
+
+function formatStatusDate(day?: string, simDate?: string) {
+  const date = formatSimDate(simDate);
+  if (day && date) {
+    return `${day} ${date}`;
+  }
+  return day || date;
+}
+
+function formatSimDate(value?: string) {
+  if (!value) {
+    return "";
+  }
+
+  const [, month, day] = value.match(/^(\d{4})-(\d{2})-(\d{2})$/) ?? [];
+  return month && day ? `${month}-${day}` : value;
+}
+
+function formatTaskStatus(status: string) {
+  return status.replaceAll("_", " ");
+}
+
+function formatAdaptationStatus(status: ProposalStatusMap[string]) {
+  if (!status.approved) {
+    return "Adaptation declined.";
+  }
+  if (status.state === "pending") {
+    return "Approval sent. Waiting for execution confirmation.";
+  }
+  return status.detail || "Adaptation executed.";
 }

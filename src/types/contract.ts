@@ -19,12 +19,13 @@
 
 export type Role = "ui" | "device";
 
-/** Lifecycle: created → planning → awaiting_approval → executing → adapting → done */
+/** Lifecycle: created → planning → awaiting_approval → executing → monitoring → adapting → done */
 export type TaskStatus =
   | "created"
   | "planning"
   | "awaiting_approval"
   | "executing"
+  | "monitoring"
   | "adapting"
   | "done";
 
@@ -52,6 +53,19 @@ export interface HelloAck {
 export interface UserGoal {
   type: "user_goal";
   text: string;
+}
+
+// ---------------------------------------------------------------------------
+// Demo controls (UI → cloud)
+// ---------------------------------------------------------------------------
+
+export type ControlCommand = "advance_day" | "reset";
+
+export interface Control {
+  type: "control";
+  goal_id: string;
+  command: ControlCommand;
+  payload: Record<string, never>;
 }
 
 // ---------------------------------------------------------------------------
@@ -244,6 +258,12 @@ export interface ExecutedAction {
 export interface StatusPayload {
   executed?: ExecutedAction[];
   note?: string;
+  /** Simulated weekday label, e.g. "Wed". */
+  day?: string;
+  /** Simulated ISO date, e.g. "2026-07-15". */
+  sim_date?: string;
+  /** True when this tick needs user attention; false for quiet sustain checks. */
+  material?: boolean;
 }
 
 export interface Status {
@@ -268,10 +288,11 @@ export type ContractMessage =
   | PresentPlan
   | Proposal
   | Approval
+  | Control
   | Status;
 
 /** Messages the UI can RECEIVE from the cloud. */
 export type UiInboundMessage = HelloAck | PresentPlan | Proposal | Status;
 
 /** Messages the UI can SEND to the cloud. */
-export type UiOutboundMessage = Hello | UserGoal | Approval;
+export type UiOutboundMessage = Hello | UserGoal | Approval | Control;

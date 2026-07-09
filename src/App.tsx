@@ -20,6 +20,8 @@ import type { ConnectionState, GoalFlowSocket } from "./lib/ws";
 import type {
   ApprovalDecision,
   ContractMessage,
+  ControlCommand,
+  Status,
   UiInboundMessage,
   UiOutboundMessage,
 } from "./types/contract";
@@ -39,6 +41,8 @@ export default function App() {
   const [frames, setFrames] = useState<FlowFrame[]>([]);
   const [proposalStatuses, setProposalStatuses] = useState<ProposalStatusMap>({});
   const [showAgentFlow, setShowAgentFlow] = useState(false);
+  const [activeGoalId, setActiveGoalId] = useState<string | null>(null);
+  const [currentTick, setCurrentTick] = useState<Status | null>(null);
 
   const recordFrame = (direction: FlowFrame["direction"], message: FlowFrame["message"]) => {
     const frame = { id: frameIdRef.current + 1, direction, message };
@@ -50,6 +54,14 @@ export default function App() {
     const handleMessage = (message: UiInboundMessage) => {
       recordFrame("recv", message);
       setMessages((current) => [...current, { kind: "agent", message }]);
+
+      if ("goal_id" in message) {
+        setActiveGoalId(message.goal_id);
+      }
+
+      if (message.type === "status") {
+        setCurrentTick(message);
+      }
 
       if (message.type === "status" && message.payload.executed) {
         setProposalStatuses((current) => {
@@ -116,6 +128,23 @@ export default function App() {
     });
   };
 
+  const sendControl = (command: ControlCommand) => {
+    if (!activeGoalId) {
+      return;
+    }
+
+    if (command === "reset") {
+      setCurrentTick(null);
+    }
+
+    socketRef.current?.send({
+      type: "control",
+      goal_id: activeGoalId,
+      command,
+      payload: {},
+    });
+  };
+
   return (
     <div className="app">
       <header>
@@ -138,6 +167,9 @@ export default function App() {
           </span>
         </div>
       </header>
+      {activeGoalId ? (
+        <DemoControls currentTick={currentTick} onCommand={sendControl} />
+      ) : null}
       <main className={showAgentFlow ? "main-layout main-layout--with-flow" : "main-layout"}>
         <ChatView
           messages={messages}
@@ -148,6 +180,48 @@ export default function App() {
         {showAgentFlow ? <AgentFlowPanel frames={frames} /> : null}
       </main>
     </div>
+  );
+}
+
+function DemoControls({
+  currentTick,
+  onCommand,
+}: {
+  currentTick: Status | null;
+  onCommand: (command: ControlCommand) => void;
+}) {
+  const currentDay = currentTick?.payload.day || "Mon";
+  const currentDate = formatSimDate(currentTick?.payload.sim_date);
+  const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+
+  return (
+    <section className="demo-controls" aria-label="Demo controls">
+      <div className="demo-controls__label">
+        <span className="eyebrow">Demo controls</span>
+        <strong>
+          {currentDay}
+          {currentDate ? ` ${currentDate}` : ""}
+        </strong>
+      </div>
+      <div className="demo-stepper" aria-label="Simulated week progress">
+        {weekDays.map((day) => (
+          <span
+            key={day}
+            className={day === currentDay ? "demo-step demo-step--active" : "demo-step"}
+          >
+            {day}
+          </span>
+        ))}
+      </div>
+      <div className="demo-controls__actions">
+        <button type="button" onClick={() => onCommand("advance_day")}>
+          Advance day ▶
+        </button>
+        <button type="button" className="secondary-button" onClick={() => onCommand("reset")}>
+          Reset week
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -190,9 +264,11 @@ function describeFrame(frame: FlowFrame) {
     case "present_plan":
       return "device → plan_ready → cloud → UI";
     case "proposal":
-      return "device → proposal → cloud → UI";
+      return `proposal ▼ ${message.payload.action}: ${message.payload.trigger}`;
     case "approval":
-      return "approval → cloud → device";
+      return approvalLabel(message);
+    case "control":
+      return `control ▲ ${message.command} → cloud`;
     case "status":
       return statusLabel(message);
     default:
@@ -200,10 +276,33 @@ function describeFrame(frame: FlowFrame) {
   }
 }
 
+function formatSimDate(value?: string) {
+  if (!value) {
+    return "";
+  }
+
+  const [, month, day] = value.match(/^(\d{4})-(\d{2})-(\d{2})$/) ?? [];
+  return month && day ? `${month}-${day}` : value;
+}
+
+function approvalLabel(message: Extract<UiOutboundMessage, { type: "approval" }>) {
+  const approvedCount = message.payload.decisions.filter((decision) => decision.approved).length;
+  const declinedCount = message.payload.decisions.length - approvedCount;
+  if (approvedCount > 0 && declinedCount === 0) {
+    return `approval ▲ adapt/approve ${approvedCount} → cloud`;
+  }
+  if (declinedCount > 0 && approvedCount === 0) {
+    return `approval ▲ decline ${declinedCount} → cloud`;
+  }
+  return `approval ▲ ${approvedCount} approved, ${declinedCount} declined → cloud`;
+}
+
 function statusLabel(message: Extract<UiInboundMessage, { type: "status" }>) {
   const executedCount = message.payload.executed?.length ?? 0;
   if (executedCount > 0) {
-    return `device → status → cloud → UI · ${executedCount} executed`;
+    return `status ▼ ${executedCount} executed · ${message.task_status}`;
   }
-  return `device → status → cloud → UI · ${message.task_status}`;
+  const day = message.payload.day ? `${message.payload.day} ` : "";
+  const material = message.payload.material ? "material" : "quiet";
+  return `status ▼ ${day}${message.task_status} · ${material}`;
 }
