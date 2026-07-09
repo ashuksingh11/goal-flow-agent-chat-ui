@@ -7,6 +7,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { ApprovalDecision, UiInboundMessage } from "../types/contract";
+import type { ProposalStatusMap } from "../types/ui";
 import { PlanCard } from "./PlanCard";
 import { MicButton } from "./MicButton";
 
@@ -25,9 +26,10 @@ export interface ChatViewProps {
     correlationId: string,
     decisions: ApprovalDecision[],
   ) => void;
+  proposalStatuses: ProposalStatusMap;
 }
 
-export function ChatView({ messages, onSendGoal, onApprove }: ChatViewProps) {
+export function ChatView({ messages, onSendGoal, onApprove, proposalStatuses }: ChatViewProps) {
   const [input, setInput] = useState("");
   const transcriptRef = useRef<HTMLOListElement | null>(null);
 
@@ -61,7 +63,11 @@ export function ChatView({ messages, onSendGoal, onApprove }: ChatViewProps) {
             {entry.kind === "user" ? (
               <div className="bubble bubble--user">{entry.text}</div>
             ) : (
-              <AgentMessage entry={entry} onApprove={onApprove} />
+              <AgentMessage
+                entry={entry}
+                onApprove={onApprove}
+                proposalStatuses={proposalStatuses}
+              />
             )}
           </li>
         ))}
@@ -85,9 +91,10 @@ export function ChatView({ messages, onSendGoal, onApprove }: ChatViewProps) {
 interface AgentMessageProps {
   entry: Extract<ChatEntry, { kind: "agent" }>;
   onApprove: ChatViewProps["onApprove"];
+  proposalStatuses: ProposalStatusMap;
 }
 
-function AgentMessage({ entry, onApprove }: AgentMessageProps) {
+function AgentMessage({ entry, onApprove, proposalStatuses }: AgentMessageProps) {
   const { message } = entry;
 
   switch (message.type) {
@@ -96,10 +103,11 @@ function AgentMessage({ entry, onApprove }: AgentMessageProps) {
         <PlanCard
           plan={message}
           onDecide={(decisions) => onApprove(message.goal_id, message.correlation_id, decisions)}
+          proposalStatuses={proposalStatuses}
         />
       );
     case "status":
-      return <div className="bubble bubble--agent">{message.payload.note}</div>;
+      return <StatusBubble message={message} />;
     case "hello_ack":
       return (
         <div className="bubble bubble--agent">
@@ -113,4 +121,30 @@ function AgentMessage({ entry, onApprove }: AgentMessageProps) {
         </div>
       );
   }
+}
+
+function StatusBubble({ message }: { message: Extract<UiInboundMessage, { type: "status" }> }) {
+  const executed = message.payload.executed ?? [];
+  const fallback = message.payload.note || `Status: ${message.task_status}`;
+
+  return (
+    <div className="bubble bubble--agent status-bubble">
+      {message.payload.note ? <p>{message.payload.note}</p> : null}
+      {executed.length > 0 ? (
+        <ul>
+          {executed.map((item) => (
+            <li key={`${item.proposal_id}-${item.action}`}>
+              {item.detail || item.result || formatAction(item.action)}
+            </li>
+          ))}
+        </ul>
+      ) : message.payload.note ? null : (
+        <p>{fallback}</p>
+      )}
+    </div>
+  );
+}
+
+function formatAction(action: string) {
+  return action.replaceAll("_", " ");
 }

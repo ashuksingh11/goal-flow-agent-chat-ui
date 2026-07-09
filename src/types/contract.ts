@@ -141,10 +141,28 @@ export interface SafetyResult {
   hard_violations: string[];
 }
 
+/** What the planner knew and used while shaping the recommendation. */
+export interface PlanPersonalization {
+  dietary?: string[];
+  dislikes?: string[];
+  prefer?: string[];
+  notes?: string;
+}
+
+/** Optional impact metrics the cloud/device may attach for display. */
+export interface PlanImpact {
+  items_used_before_expiry?: number;
+  pork_meals?: number;
+  veg_forward_dinners?: number;
+  grocery_items?: number;
+}
+
 export interface PlanPayload {
   plan: PlanItem[];
   proposals: PlanProposal[];
   safety: SafetyResult;
+  knew?: PlanPersonalization;
+  impact?: PlanImpact;
 }
 
 /** Device → cloud. The UI sees its relayed twin, PresentPlan. */
@@ -216,8 +234,16 @@ export interface Approval {
 // 7) status (device → cloud, relayed to UI)
 // ---------------------------------------------------------------------------
 
+export interface ExecutedAction {
+  proposal_id: string;
+  action: string;
+  result: string;
+  detail: string;
+}
+
 export interface StatusPayload {
-  note: string;
+  executed?: ExecutedAction[];
+  note?: string;
 }
 
 export interface Status {

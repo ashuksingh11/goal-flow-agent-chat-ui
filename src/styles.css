@@ -52,6 +52,30 @@ header {
   padding: 1rem clamp(1rem, 3vw, 2rem);
 }
 
+.header-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.agent-flow-toggle {
+  align-items: center;
+  color: #3f4b43;
+  display: inline-flex;
+  font-size: 0.9rem;
+  font-weight: 800;
+  gap: 0.45rem;
+  white-space: nowrap;
+}
+
+.agent-flow-toggle input {
+  accent-color: #1f6f5b;
+  height: 1rem;
+  width: 1rem;
+}
+
 h1,
 h2,
 h3,
@@ -105,6 +129,16 @@ h1 {
 
 main {
   min-height: 0;
+}
+
+.main-layout {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+}
+
+.main-layout--with-flow {
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 22rem);
 }
 
 .chat-view {
@@ -202,6 +236,16 @@ main {
   font-size: 1.35rem;
 }
 
+.known-context {
+  background: #f7f3eb;
+  border-left: 3px solid #c9872d;
+  border-radius: 6px;
+  color: #455044;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  padding: 0.65rem 0.8rem;
+}
+
 .safety-chip {
   border-radius: 999px;
   flex: 0 0 auto;
@@ -281,9 +325,58 @@ main {
   padding: 0.75rem;
 }
 
+.proposal-list__topline {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
 .proposal-list p {
   color: #5c665d;
   margin-top: 0.25rem;
+}
+
+.proposal-status {
+  border-radius: 999px;
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 0.25rem 0.5rem;
+  white-space: nowrap;
+}
+
+.proposal-status--pending {
+  background: #fff1d7;
+  color: #82540f;
+}
+
+.proposal-status--done {
+  background: #dff3e8;
+  color: #17603f;
+}
+
+.proposal-status--declined {
+  background: #e7e1d7;
+  color: #4f584f;
+}
+
+.impact-row {
+  border-top: 1px solid #e6dfd4;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding-top: 0.9rem;
+}
+
+.impact-badge {
+  background: #eef3ef;
+  border: 1px solid #d9e2d9;
+  border-radius: 999px;
+  color: #364139;
+  font-size: 0.85rem;
+  font-weight: 800;
+  padding: 0.35rem 0.6rem;
 }
 
 .plan-actions {
@@ -295,6 +388,88 @@ main {
 .secondary-button {
   background: #e7e1d7;
   color: #26332a;
+}
+
+.status-bubble {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.status-bubble ul {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.agent-flow-panel {
+  background: #f8f4ec;
+  border-left: 1px solid #ded8cd;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.agent-flow-panel__header {
+  align-items: center;
+  background: #fffcf6;
+  border-bottom: 1px solid #ded8cd;
+  display: flex;
+  justify-content: space-between;
+  padding: 0.85rem 1rem;
+}
+
+.agent-flow-panel__header strong {
+  color: #536058;
+  font-size: 0.85rem;
+}
+
+.agent-flow-empty {
+  color: #6f786f;
+  padding: 1rem;
+}
+
+.agent-flow-list {
+  display: grid;
+  gap: 0.6rem;
+  list-style: none;
+  margin: 0;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.agent-flow-item {
+  align-items: flex-start;
+  background: #fffcf6;
+  border: 1px solid #e2dbd0;
+  border-radius: 8px;
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: auto 1fr;
+  padding: 0.65rem;
+}
+
+.agent-flow-item > span {
+  color: #1f6f5b;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.agent-flow-item--recv > span {
+  color: #c07a1d;
+}
+
+.agent-flow-item strong {
+  display: block;
+  font-size: 0.88rem;
+}
+
+.agent-flow-item p {
+  color: #5e695f;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  margin-top: 0.15rem;
 }
 
 @media (max-width: 640px) {
@@ -310,12 +485,33 @@ main {
     flex-direction: column;
   }
 
+  .header-actions {
+    justify-content: flex-start;
+  }
+
   .plan-day {
     grid-template-columns: 1fr;
+  }
+
+  .proposal-list__topline {
+    flex-direction: column;
+    gap: 0.45rem;
   }
 
   .connection-status,
   .safety-chip {
     width: fit-content;
+  }
+}
+
+@media (max-width: 900px) {
+  .main-layout--with-flow {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(14rem, 32vh);
+  }
+
+  .agent-flow-panel {
+    border-left: 0;
+    border-top: 1px solid #ded8cd;
   }
 }

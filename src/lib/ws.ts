@@ -19,6 +19,8 @@ export interface GoalFlowSocketOptions {
   url?: string;
   /** Called with every parsed inbound frame (hello_ack, present_plan, proposal, status). */
   onMessage: (message: UiInboundMessage) => void;
+  /** Called after an outbound frame is successfully written to the socket. */
+  onSent?: (message: UiOutboundMessage) => void;
   /** Called on connection state changes (drive a status indicator in the UI). */
   onStateChange?: (state: ConnectionState) => void;
 }
@@ -101,7 +103,9 @@ export function createGoalFlowSocket(options: GoalFlowSocketOptions): GoalFlowSo
 
     socket.addEventListener("open", () => {
       setState("open");
-      socket?.send(JSON.stringify({ type: "hello", role: "ui" } satisfies UiOutboundMessage));
+      const hello = { type: "hello", role: "ui" } satisfies UiOutboundMessage;
+      socket?.send(JSON.stringify(hello));
+      options.onSent?.(hello);
     });
 
     socket.addEventListener("message", (event) => {
@@ -148,6 +152,7 @@ export function createGoalFlowSocket(options: GoalFlowSocketOptions): GoalFlowSo
         return;
       }
       socket.send(JSON.stringify(message));
+      options.onSent?.(message);
     },
     close,
     get state() {
