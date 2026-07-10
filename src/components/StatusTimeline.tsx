@@ -6,7 +6,6 @@
  * ("5 items added ✓"). Deliberately calm — the contrast that makes the
  * AdaptationCard's entrance loud.
  *
- * SKELETON — tick shapes are final; render/motion (tick-appear) is TODO.
  */
 
 import type { Status } from "../types/contract";
@@ -18,26 +17,46 @@ export interface StatusTimelineProps {
 function tickLabel(tick: Status): string {
   const executed = tick.payload.executed;
   if (executed && executed.length > 0) {
-    return `${executed.length} action(s) executed`;
+    const first = executed[0];
+    return executed.length === 1
+      ? `${first.action} ✓${first.detail ? ` - ${first.detail}` : ""}`
+      : `${executed.length} actions executed ✓`;
   }
   return tick.payload.note ?? tick.task_status;
 }
 
+function tickDay(tick: Status): string {
+  if (tick.payload.day) return tick.payload.day;
+  if (!tick.payload.sim_date) return "";
+  const date = new Date(`${tick.payload.sim_date}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(date);
+}
+
 export function StatusTimeline({ ticks }: StatusTimelineProps) {
+  const visibleTicks = ticks.slice(-8);
+
   return (
-    <ol className="status-timeline" aria-label="Monitoring updates">
-      {ticks.map((tick, index) => (
+    <section className="status-panel" aria-label="Monitoring updates">
+      <div className="status-panel__header">
+        <span className="eyebrow">Monitoring</span>
+        <strong>{ticks.length}</strong>
+      </div>
+      <ol className="status-timeline">
+      {visibleTicks.map((tick, index) => (
         <li
           key={`${tick.correlation_id}-${index}`}
           className={
-            tick.payload.material ? "status-tick status-tick--material" : "status-tick"
+            tick.payload.material || tick.payload.executed?.length
+              ? "status-tick status-tick--material"
+              : "status-tick"
           }
         >
-          <span className="status-tick__day">{tick.payload.day ?? ""}</span>
+          <span className="status-tick__day">{tickDay(tick)}</span>
           <span className="status-tick__note">{tickLabel(tick)}</span>
-          {/* TODO(M-impl): tick-appear animation; group by sim day */}
         </li>
       ))}
-    </ol>
+      </ol>
+    </section>
   );
 }

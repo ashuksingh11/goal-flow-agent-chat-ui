@@ -391,7 +391,9 @@ export default function App() {
         <section className="stage__main">
           <GoalComposer onSubmit={submitGoal} disabled={connection !== "open"} />
 
-          {state.agentEntries.length > 0 || state.working ? (
+          {/* The live "watch it think" stream is for the WORKING phase; once the
+              plan is the hero it collapses (raw trail stays in presenter mode). */}
+          {!state.plan && (state.agentEntries.length > 0 || state.working) ? (
             <AgentStream entries={state.agentEntries} active={state.working} />
           ) : null}
 

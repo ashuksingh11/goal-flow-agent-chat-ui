@@ -9,11 +9,11 @@
  * (payload.action + detail) → tier-weighted Adapt/Keep actions (firm renders
  * heavy, same treatment as ProposalList).
  *
- * SKELETON — render/motion is TODO (`card-enter` + glow keyframes).
  */
 
 import type { Proposal } from "../types/contract";
 import type { ProposalDecisionStatus } from "../types/ui";
+import { TIER_META } from "../types/ui";
 
 export interface AdaptationCardProps {
   proposal: Proposal;
@@ -23,29 +23,43 @@ export interface AdaptationCardProps {
 
 export function AdaptationCard({ proposal, status, onDecide }: AdaptationCardProps) {
   const { payload } = proposal;
+  const meta = TIER_META[payload.tier];
+  const confirmed = status?.state === "done";
+  const pending = status?.state === "pending";
 
   return (
     <article
-      className={`adaptation-card adaptation-card--${payload.tier}`}
+      className={`adaptation-card adaptation-card--${payload.tier} adaptation-card--${status?.state ?? "open"}`}
       aria-label="Plan adaptation"
     >
-      <p className="adaptation-card__trigger">
+      <div className="adaptation-card__trigger">
         <span className="eyebrow">Caught a change</span>
-        {payload.trigger}
-      </p>
+        <p>{payload.trigger}</p>
+      </div>
+      <span className="adaptation-card__tier">{meta.label}</span>
       <p className="adaptation-card__action">{payload.action}</p>
       <p className="adaptation-card__detail">{payload.detail}</p>
       {payload.requires_approval && !status ? (
         <div className="adaptation-card__actions">
-          <button type="button" className="button--firm" onClick={() => onDecide(true)}>
+          <button
+            type="button"
+            className={payload.tier === "firm" ? "button--firm" : "button--light"}
+            onClick={() => onDecide(true)}
+          >
             Adapt
           </button>
           <button type="button" className="button--ghost" onClick={() => onDecide(false)}>
-            Keep plan
+            Decline
           </button>
         </div>
       ) : null}
-      {/* TODO(M-impl): pending/done states from `status`; entrance glow animation */}
+      {pending ? <p className="adaptation-card__state">Waiting for confirmation</p> : null}
+      {confirmed ? (
+        <p className="adaptation-card__state">
+          {status.approved ? "Adapted ✓" : "Declined"}
+          {status.detail ? ` - ${status.detail}` : ""}
+        </p>
+      ) : null}
     </article>
   );
 }

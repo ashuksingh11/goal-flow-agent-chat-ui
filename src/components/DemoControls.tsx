@@ -11,13 +11,10 @@
  *   bug where "Advance day" appeared to do nothing.
  * - Controls are NOT optimistic: advance_day/set_date/reset go up as control
  *   frames; the strip re-renders when the device's status echoes back
- *   (single source of truth). TODO(M-impl): brief "syncing…" shimmer on the
- *   label between click and echo.
- *
- * SKELETON — derivation helpers are implemented (they ARE the fix);
- * layout/motion polish is TODO.
+ *   (single source of truth).
  */
 
+import { useEffect, useState } from "react";
 import type { ControlCommand } from "../types/contract";
 import type { DemoClock } from "../types/ui";
 
@@ -80,10 +77,31 @@ export function deriveClockDisplay(clock: DemoClock, realToday = new Date()): Cl
 
 export function DemoControls({ clock, onCommand }: DemoControlsProps) {
   const display = deriveClockDisplay(clock);
+  const [selectedDate, setSelectedDate] = useState(display.iso);
+  const [syncing, setSyncing] = useState(false);
+
+  useEffect(() => {
+    setSelectedDate(display.iso);
+    setSyncing(false);
+  }, [display.iso]);
+
+  useEffect(() => {
+    if (!syncing) return;
+    const timeout = window.setTimeout(() => setSyncing(false), 1800);
+    return () => window.clearTimeout(timeout);
+  }, [syncing]);
+
+  const sendCommand = (command: ControlCommand, payload?: { date?: string }) => {
+    setSyncing(true);
+    onCommand(command, payload);
+  };
 
   return (
-    <section className="demo-controls" aria-label="Demo controls">
-      <div className="demo-controls__now">
+    <section
+      className={syncing ? "demo-controls demo-controls--syncing" : "demo-controls"}
+      aria-label="Demo controls"
+    >
+      <div className="demo-controls__now" aria-live="polite">
         <span className="eyebrow">Sim clock</span>
         <strong>
           {display.dayLabel} {display.dateLabel}
@@ -102,27 +120,28 @@ export function DemoControls({ clock, onCommand }: DemoControlsProps) {
       </div>
 
       <div className="demo-controls__actions">
-        <button type="button" onClick={() => onCommand("advance_day")}>
+        <button type="button" onClick={() => sendCommand("advance_day")}>
           Advance day
         </button>
         <button
           type="button"
           className="button--ghost"
-          onClick={() => onCommand("reset")}
+          onClick={() => sendCommand("reset")}
         >
           Reset
         </button>
         <input
           type="date"
           aria-label="Set simulated date"
-          defaultValue={display.iso}
+          value={selectedDate}
           onChange={(event) => {
-            if (event.target.value) {
-              onCommand("set_date", { date: event.target.value });
+            const date = event.target.value;
+            setSelectedDate(date);
+            if (date) {
+              sendCommand("set_date", { date });
             }
           }}
         />
-        {/* TODO(M-impl): "syncing…" shimmer between control send and status echo */}
       </div>
     </section>
   );

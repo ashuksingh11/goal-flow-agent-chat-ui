@@ -7,7 +7,6 @@
  * (`rail-pulse` keyframe); completed phases render a check; the connector
  * fills left-to-right as phases complete.
  *
- * SKELETON — structure + states are final; motion polish is TODO.
  */
 
 import { RAIL_PHASES } from "../types/ui";
@@ -32,15 +31,30 @@ function stepState(step: RailPhase, current: RailPhase | null): StepState {
 }
 
 export function ProgressRail({ phase }: ProgressRailProps) {
+  const currentOrder = phase === null ? -1 : RAIL_PHASES.findIndex((p) => p.id === phase);
+
   return (
-    <nav className="progress-rail" aria-label="Agent progress">
+    <nav
+      className={phase === null ? "progress-rail progress-rail--idle" : "progress-rail"}
+      aria-label="Agent progress"
+    >
       {RAIL_PHASES.map((step, index) => {
         const state = stepState(step.id, phase);
+        const connectorDone = index > 0 && index <= currentOrder;
         return (
           <div key={step.id} className={`rail-step rail-step--${state}`}>
-            {index > 0 ? <span className="rail-connector" aria-hidden="true" /> : null}
+            {index > 0 ? (
+              <span
+                className={
+                  connectorDone
+                    ? "rail-connector rail-connector--done"
+                    : "rail-connector"
+                }
+                aria-hidden="true"
+              />
+            ) : null}
             <span className="rail-dot" aria-hidden="true">
-              {/* TODO(M-impl): check icon when done, pulsing core when active */}
+              {state === "done" ? "✓" : null}
             </span>
             <span className="rail-label">{step.label}</span>
           </div>

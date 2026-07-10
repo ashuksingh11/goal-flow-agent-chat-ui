@@ -10,7 +10,7 @@
  * - "line":     a single text bar
  * - "chip":     a tool-chip-sized pill
  *
- * SKELETON — shimmer keyframe lives in styles.css (`skeleton-shimmer`).
+ * Shimmer keyframe lives in styles.css (`skeleton-shimmer`).
  */
 
 export type SkeletonVariant = "plan-item" | "line" | "chip";
@@ -26,7 +26,17 @@ export function Skeleton({ variant, count = 1 }: SkeletonProps) {
     <div className="skeleton-group" aria-hidden="true">
       {Array.from({ length: count }, (_, i) => (
         <div key={i} className={`skeleton skeleton--${variant}`}>
-          {/* TODO(M-impl): per-variant inner bars (title/detail/tags for plan-item) */}
+          {variant === "plan-item" ? (
+            <>
+              <span className="skeleton__bar skeleton__bar--title" />
+              <span className="skeleton__bar skeleton__bar--detail" />
+              <span className="skeleton__chips">
+                <span />
+                <span />
+                <span />
+              </span>
+            </>
+          ) : null}
         </div>
       ))}
     </div>

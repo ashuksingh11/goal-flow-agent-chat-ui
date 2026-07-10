@@ -18,9 +18,9 @@
  * 5. ProposalList   — the tiered approvals (child component).
  * Explanation stays one collapsed line ("why this plan") — MINIMAL TEXT.
  *
- * SKELETON — structure + data mapping final; render/motion is TODO.
  */
 
+import type { CSSProperties } from "react";
 import type { ApprovalDecision, PresentPlan } from "../types/contract";
 import type { ProposalStatusMap } from "../types/ui";
 import { ProposalList } from "./ProposalList";
@@ -31,6 +31,27 @@ export interface PlanCardProps {
   onDecide: (decisions: ApprovalDecision[]) => void;
 }
 
+function formatWhen(when?: string): string | null {
+  if (!when) return null;
+  const date = new Date(when);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function knewValue(value: unknown): string {
+  // Defensive: only render primitives / string lists — never a raw object
+  // (that would crash React). Objects/empties collapse to "".
+  if (Array.isArray(value)) return value.slice(0, 3).map(String).join(", ");
+  if (value == null || typeof value === "object") return "";
+  return String(value);
+}
+
 export function PlanCard({ plan, proposalStatuses, onDecide }: PlanCardProps) {
   const { payload } = plan;
 
@@ -39,26 +60,71 @@ export function PlanCard({ plan, proposalStatuses, onDecide }: PlanCardProps) {
       {payload.knew ? (
         <p className="plan-card__knew">
           <span className="eyebrow">Knew</span>
-          {Object.entries(payload.knew).map(([key, value]) => (
-            <span key={key} className="knew-chip">
-              {key}: {Array.isArray(value) ? value.join(", ") : value}
-            </span>
-          ))}
+          {Object.entries(payload.knew)
+            .map(([key, value]) => [key, knewValue(value)] as const)
+            .filter(([, text]) => text !== "")
+            .map(([key, text]) => (
+              <span key={key} className="knew-chip">
+                <strong>{key}</strong> {text}
+              </span>
+            ))}
         </p>
       ) : null}
 
-      <span className={`safety-chip safety-chip--${payload.safety.gate}`}>
-        Safety {payload.safety.gate === "passed" ? "✓" : "✕"}
-        {/* TODO(M-impl): violations popover when blocked */}
-      </span>
+      <div className="plan-card__meta">
+        <span
+          className={`safety-chip safety-chip--${payload.safety.gate}`}
+          title={payload.safety.violations.join(", ")}
+        >
+          Safety {payload.safety.gate === "passed" ? "✓ passed" : "blocked"}
+        </span>
+        {payload.explanation ? (
+          <details className="plan-explanation">
+            <summary>Why this plan</summary>
+            <p>{payload.explanation}</p>
+          </details>
+        ) : null}
+      </div>
 
       <ol className="plan-items">
-        {payload.plan.map((item) => (
-          <li key={item.id} className="plan-item">
-            <strong className="plan-item__title">{item.title}</strong>
+        {payload.plan.map((item, index) => (
+          <li
+            key={item.id}
+            className="plan-item"
+            style={{ "--i": index } as CSSProperties}
+          >
+            <div className="plan-item__topline">
+              <strong className="plan-item__title">{item.title}</strong>
+              {formatWhen(item.when) ? (
+                <time className="plan-item__when" dateTime={item.when}>
+                  {formatWhen(item.when)}
+                </time>
+              ) : null}
+            </div>
             <span className="plan-item__detail">{item.detail}</span>
-            {/* TODO(M-impl): item.when → short local time; item.why → hover/
-                tap rationale bullets; item.tags → pills; staggered card-enter */}
+            <div className="plan-item__footer">
+              {item.why.length > 0 ? (
+                <details className="why-popover">
+                  <summary>{item.why[0]}</summary>
+                  {item.why.length > 1 ? (
+                    <ul>
+                      {item.why.slice(1, 4).map((reason) => (
+                        <li key={reason}>{reason}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </details>
+              ) : null}
+              {item.tags.length > 0 ? (
+                <div className="tag-row" aria-label="Tags">
+                  {item.tags.slice(0, 4).map((tag) => (
+                    <span key={tag} className="tag-chip">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </li>
         ))}
       </ol>
@@ -76,8 +142,6 @@ export function PlanCard({ plan, proposalStatuses, onDecide }: PlanCardProps) {
         statuses={proposalStatuses}
         onDecide={onDecide}
       />
-
-      {/* TODO(M-impl): collapsed one-line payload.explanation ("Why this plan?") */}
     </article>
   );
 }
