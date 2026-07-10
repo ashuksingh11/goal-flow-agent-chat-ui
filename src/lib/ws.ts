@@ -1,34 +1,46 @@
 /**
- * WebSocket client wrapper for the GoalFlow cloud hub.
+ * WebSocket client wrapper for the GoalFlow cloud hub (CONTRACT v2).
  *
- * Lifecycle (Contract v0):
+ * Lifecycle:
  *   1. open ONE outbound WS to VITE_WS_URL (default ws://localhost:8000/ws)
  *   2. on open, send `hello { role: "ui" }` and wait for `hello_ack`
- *   3. dispatch parsed inbound frames to a listener
+ *   3. dispatch parsed inbound frames to a listener (hello_ack, capabilities,
+ *      agent_event, present_plan, proposal, status)
  *   4. on drop, reconnect (backoff) and re-send `hello`
  *
  * Invariant: the UI talks ONLY to the cloud — never to the device.
+ * TODO(M-impl): dedupe device-origin frames on correlation_id + agent_event.seq
+ *               after a reconnect; queue outbound frames while closed.
  */
 
 import type { UiInboundMessage, UiOutboundMessage } from "../types/contract";
 
 export type ConnectionState = "connecting" | "open" | "closed";
 
+const INBOUND_TYPES = new Set([
+  "hello_ack",
+  "capabilities",
+  "agent_event",
+  "present_plan",
+  "proposal",
+  "status",
+]);
+
 export interface GoalFlowSocketOptions {
   /** Defaults to import.meta.env.VITE_WS_URL. */
   url?: string;
-  /** Called with every parsed inbound frame (hello_ack, present_plan, proposal, status). */
+  /** Called with every parsed inbound frame. */
   onMessage: (message: UiInboundMessage) => void;
   /** Called after an outbound frame is successfully written to the socket. */
   onSent?: (message: UiOutboundMessage) => void;
-  /** Called on connection state changes (drive a status indicator in the UI). */
+  /** Called on connection state changes (drives the header indicator). */
   onStateChange?: (state: ConnectionState) => void;
 }
 
 export interface GoalFlowSocket {
   /** Open the connection and perform the hello handshake. */
   connect(): void;
-  /** Serialize and send a frame (user_goal, approval). No-op TODO: queue while closed? (M2) */
+  /** Serialize and send a frame (user_goal, approval, control). */
   send(message: UiOutboundMessage): void;
   /** Close deliberately (no auto-reconnect afterwards). */
   close(): void;
@@ -48,16 +60,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isUiInboundMessage(value: unknown): value is UiInboundMessage {
-  if (!isRecord(value) || typeof value.type !== "string") {
-    return false;
-  }
-
-  return (
-    value.type === "hello_ack" ||
-    value.type === "present_plan" ||
-    value.type === "proposal" ||
-    value.type === "status"
-  );
+  return isRecord(value) && typeof value.type === "string" && INBOUND_TYPES.has(value.type);
 }
 
 /** Create the singleton hub connection. */

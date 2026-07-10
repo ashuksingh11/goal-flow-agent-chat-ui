@@ -1,16 +1,18 @@
 /**
- * TypeScript mirror of GoalFlow Contract v0.
+ * TypeScript mirror of GoalFlow CONTRACT v2 — the generic goal-agent protocol.
  *
- * CANONICAL SPEC: goal-flow-cloud-agent/CONTRACT.md — this file mirrors it
- * field-for-field and must never drift (the Python mirror is
- * goal-flow-cloud-agent/src/goalflow_cloud/models/contract.py).
+ * CANONICAL SPEC: CONTRACT v2 (cloud repo). This file mirrors it field-for-field
+ * and must never drift (Python mirror in the cloud repo, C# mirror on the device).
+ *
+ * v2 is GENERIC & DOMAIN-AGNOSTIC: no meal-specific fields. A `domain` string
+ * carries the use case; domain specifics live in capability modules and the
+ * free-form `scope` / `context` objects. The same protocol serves any goal.
  *
  * Transport notes:
- * - All messages are JSON objects; `type` is the discriminant.
- * - Every task-related message carries `goal_id`.
- * - Device<->cloud messages carry `correlation_id` (dedupe key; also
- *   correlates an approval back to its proposal).
- * - The UI opens ONE outbound WS to the cloud and never talks to the device.
+ * - JSON text frames over ONE outbound WS to the cloud; `type` discriminates.
+ * - Task messages carry `goal_id`; device<->cloud messages carry
+ *   `correlation_id` (dedupe key; ties approvals back to proposals).
+ * - The UI NEVER talks to the device directly — the cloud is the hub.
  */
 
 // ---------------------------------------------------------------------------
@@ -19,15 +21,30 @@
 
 export type Role = "ui" | "device";
 
-/** Lifecycle: created → planning → awaiting_approval → executing → monitoring → adapting → done */
+/**
+ * Task lifecycle:
+ * created → interpreting → grounding → planning → checking →
+ * awaiting_approval → executing → monitoring → adapting → done
+ */
 export type TaskStatus =
   | "created"
+  | "interpreting"
+  | "grounding"
   | "planning"
+  | "checking"
   | "awaiting_approval"
   | "executing"
   | "monitoring"
   | "adapting"
   | "done";
+
+/**
+ * Approval tier (reversibility × cost × risk):
+ * - "auto":  reversible, executed without asking (shown as already done)
+ * - "light": quick consent (e.g. add to shopping list)
+ * - "firm":  spends money / irreversible — explicit, visually heavy approval
+ */
+export type ApprovalTier = "auto" | "light" | "firm";
 
 // ---------------------------------------------------------------------------
 // Handshake
@@ -47,7 +64,37 @@ export interface HelloAck {
 }
 
 // ---------------------------------------------------------------------------
-// 1) user_goal (UI → cloud)
+// capabilities (device → cloud → UI) — the device's MODULE REGISTRY
+// ---------------------------------------------------------------------------
+
+/** One callable function a capability module exposes to the planner. */
+export interface ModuleFunction {
+  name: string;
+  description: string;
+  /** True when calling it changes the world (must be proposed, not just run). */
+  side_effecting: boolean;
+  /** Present on side-effecting functions: the approval tier they default to. */
+  tier?: ApprovalTier;
+}
+
+/** One module in the device registry (extensibility/discovery surface). */
+export interface CapabilityModule {
+  name: string;
+  /** "capability" = domain tools the LLM calls; "steering" = harness module. */
+  kind: "capability" | "steering";
+  description?: string;
+  /** Present on kind:"capability" modules. */
+  functions?: ModuleFunction[];
+}
+
+/** Device advertises its module registry; the cloud relays it to the UI. */
+export interface Capabilities {
+  type: "capabilities";
+  modules: CapabilityModule[];
+}
+
+// ---------------------------------------------------------------------------
+// user_goal (UI → cloud)
 // ---------------------------------------------------------------------------
 
 export interface UserGoal {
@@ -56,127 +103,159 @@ export interface UserGoal {
 }
 
 // ---------------------------------------------------------------------------
-// Demo controls (UI → cloud)
-// ---------------------------------------------------------------------------
-
-export type ControlCommand = "advance_day" | "reset";
-
-export interface Control {
-  type: "control";
-  goal_id: string;
-  command: ControlCommand;
-  payload: Record<string, never>;
-}
-
-// ---------------------------------------------------------------------------
-// 2) dispatch (cloud → device) — the Task Contract
+// dispatch (cloud → device) — the GENERIC Task Contract
 //    (The UI never receives this; typed for completeness of the mirror.)
 // ---------------------------------------------------------------------------
 
-export interface DispatchScope {
-  meal: string;
-  days: string[];
+/**
+ * constraints.hard is the ONLY block the deterministic Safety filter enforces
+ * (allergens, medical, dietary, budget_cap, quiet_hours, …). Free-form by
+ * design — the protocol stays domain-agnostic.
+ */
+export interface DispatchConstraints {
+  hard: Record<string, unknown>;
+  soft: Record<string, unknown>;
 }
 
+/** RELATIVE to real today — never hardcoded dates. ISO date strings. */
 export interface TimeWindow {
-  /** ISO date, e.g. "2026-07-13" */
   start: string;
-  /** ISO date, e.g. "2026-07-17" */
   end: string;
 }
 
-/**
- * The ONLY block the device safety gate reads. Injected verbatim from family
- * memory — never produced by LLM semantics.
- */
-export interface HardConstraints {
-  allergens: string[];
-  dietary: string[];
-  medical: string[];
-}
-
-/** Preferences that bias planning only; never enforced by the safety gate. */
-export interface SoftConstraints {
-  dislikes: string[];
-  prefer: string[];
-}
-
-export interface DispatchConstraints {
-  hard: HardConstraints;
-  soft: SoftConstraints;
-}
-
-export interface ContextHints {
+export interface DispatchContext {
   notes: string;
 }
 
 export interface Dispatch {
   type: "dispatch";
   goal_id: string;
+  /** The use case, e.g. "meal_plan", "guest_dinner". Domain-specifics live in scope. */
+  domain: string;
   objective: string;
-  scope: DispatchScope;
-  time_window: TimeWindow;
+  success_criteria: string[];
   constraints: DispatchConstraints;
-  optimization: string[];
-  /** e.g. "propose_all" */
+  /** Domain-flexible object — the protocol does not know its shape. */
+  scope: Record<string, unknown>;
+  time_window: TimeWindow;
+  /** e.g. "tiered" — proposals carry per-action tiers. */
   autonomy: string;
-  context_hints: ContextHints;
-  /** e.g. "kb/device/meal-2026-w29" */
-  reply_to: string;
+  context: DispatchContext;
 }
 
 // ---------------------------------------------------------------------------
-// 3) plan_ready (device → cloud)  /  4) present_plan (cloud → UI)
+// agent_event (device → cloud → UI) — STREAMED as the device works.
+// Drives the wow UI: progress rail, thinking stream, tool-call chips.
 // ---------------------------------------------------------------------------
 
+/** Phases the device reports while working (subset of TaskStatus). */
+export type AgentPhase =
+  | "interpreting"
+  | "grounding"
+  | "planning"
+  | "checking"
+  | "awaiting_approval";
+
+interface AgentEventBase {
+  type: "agent_event";
+  goal_id: string;
+  correlation_id: string;
+  /** Monotonic per-goal sequence — order/dedupe streamed frames on it. */
+  seq: number;
+}
+
+/** The device entered a new working phase → advance the progress rail. */
+export interface AgentPhaseEvent extends AgentEventBase {
+  event: "phase";
+  payload: { phase: AgentPhase };
+}
+
+/** A fragment of the model's reasoning → append to the live thinking stream. */
+export interface AgentThinkingEvent extends AgentEventBase {
+  event: "thinking";
+  payload: { text: string };
+}
+
+/** The LLM is calling a capability function → pop in a running tool chip. */
+export interface AgentToolCallEvent extends AgentEventBase {
+  event: "tool_call";
+  payload: { module: string; function: string; args: Record<string, unknown> };
+}
+
+/** The call returned → resolve the matching chip with a one-line summary. */
+export interface AgentToolResultEvent extends AgentEventBase {
+  event: "tool_result";
+  payload: { module: string; function: string; summary: string };
+}
+
+/** A plan item has taken shape → replace one skeleton row with a draft row. */
+export interface AgentPlanProgressEvent extends AgentEventBase {
+  event: "plan_progress";
+  payload: { item: Partial<PlanItem> & Pick<PlanItem, "title"> };
+}
+
+/** Discriminate on `event` (after narrowing `type === "agent_event"`). */
+export type AgentEvent =
+  | AgentPhaseEvent
+  | AgentThinkingEvent
+  | AgentToolCallEvent
+  | AgentToolResultEvent
+  | AgentPlanProgressEvent;
+
+export type AgentEventKind = AgentEvent["event"];
+
+// ---------------------------------------------------------------------------
+// plan_ready (device → cloud)  /  present_plan (cloud → UI)
+// ---------------------------------------------------------------------------
+
+/** A GENERIC plan step — works for meal days, guest-prep tasks, chores, … */
 export interface PlanItem {
-  day: string;
-  dish: string;
+  id: string;
+  title: string;
+  detail: string;
+  /** Optional ISO timestamp — when this step happens (relative to real today). */
+  when?: string;
+  /** Rationale bullets ("uses expiring paneer", "fits Dad's low-sodium"). */
   why: string[];
+  /** Free-form badges ("waste-win", "veg", "prep"). */
+  tags: string[];
 }
 
 /**
- * A proposed action attached to a plan. Proposals are proposals, not actions:
- * the device executes NOTHING until an approval returns.
+ * A proposed side effect attached to the plan. Proposals are proposals, not
+ * actions: nothing above tier "auto" executes until an approval returns.
  */
 export interface PlanProposal {
   proposal_id: string;
-  /** e.g. "add_to_shopping_list" */
+  /** Human-readable action label, e.g. "Add 5 items to the shopping list". */
   action: string;
-  items: string[];
+  /** The capability call this proposal will make when approved. */
+  module: string;
+  function: string;
+  args: Record<string, unknown>;
+  tier: ApprovalTier;
   reason: string;
   requires_approval: boolean;
 }
 
-/** Outcome of the device-side deterministic safety gate. */
+/** Outcome of the device-side deterministic safety gate ("LLM plans, code checks"). */
 export interface SafetyResult {
-  /** e.g. "passed" */
-  gate: string;
-  hard_violations: string[];
+  gate: "passed" | "blocked";
+  violations: string[];
 }
 
-/** What the planner knew and used while shaping the recommendation. */
-export interface PlanPersonalization {
-  dietary?: string[];
-  dislikes?: string[];
-  prefer?: string[];
-  notes?: string;
-}
-
-/** Optional impact metrics the cloud/device may attach for display. */
-export interface PlanImpact {
-  items_used_before_expiry?: number;
-  pork_meals?: number;
-  veg_forward_dinners?: number;
-  grocery_items?: number;
+/** One impact badge, e.g. { label: "items rescued before expiry", value: "3" }. */
+export interface ImpactBadge {
+  label: string;
+  value: string;
 }
 
 export interface PlanPayload {
   plan: PlanItem[];
   proposals: PlanProposal[];
   safety: SafetyResult;
-  knew?: PlanPersonalization;
-  impact?: PlanImpact;
+  impact: ImpactBadge[];
+  explanation: string;
 }
 
 /** Device → cloud. The UI sees its relayed twin, PresentPlan. */
@@ -188,40 +267,28 @@ export interface PlanReady {
   payload: PlanPayload;
 }
 
-/** Cloud → UI: the plan_ready payload relayed for rendering (cloud MAY add display hints). */
+/**
+ * The personalization line — what the agent already knew and used.
+ * Free-form key → value(s); the UI renders it as the "Knew:" line.
+ */
+export type PlanKnew = Record<string, string | string[]>;
+
+export interface PresentPlanPayload extends PlanPayload {
+  /** Added by the cloud when relaying: the "what it knew" personalization. */
+  knew?: PlanKnew;
+}
+
+/** Cloud → UI: plan_ready relayed + payload.knew. */
 export interface PresentPlan {
   type: "present_plan";
   goal_id: string;
   correlation_id: string;
   task_status: TaskStatus;
-  payload: PlanPayload;
-  display_hints?: Record<string, string>;
+  payload: PresentPlanPayload;
 }
 
 // ---------------------------------------------------------------------------
-// 5) proposal (device → cloud, relayed to UI) — adaptation
-// ---------------------------------------------------------------------------
-
-export interface AdaptationPayload {
-  proposal_id: string;
-  /** e.g. "add_prep_task" */
-  action: string;
-  detail: string;
-  /** What caused the adaptation, e.g. a calendar event. */
-  trigger: string;
-  requires_approval: boolean;
-}
-
-export interface Proposal {
-  type: "proposal";
-  goal_id: string;
-  correlation_id: string;
-  task_status: TaskStatus;
-  payload: AdaptationPayload;
-}
-
-// ---------------------------------------------------------------------------
-// 6) approval (UI → cloud → device)
+// approval (UI → cloud → device)
 // ---------------------------------------------------------------------------
 
 export interface ApprovalDecision {
@@ -234,8 +301,8 @@ export interface ApprovalPayload {
 }
 
 /**
- * The user's decisions — the APPROVAL gate (user, via cloud). `correlation_id`
- * ties the decision back to the proposal it answers.
+ * The user's decisions — the HITL gate. `correlation_id` ties the decision
+ * back to the proposal/plan it answers.
  */
 export interface Approval {
   type: "approval";
@@ -245,7 +312,31 @@ export interface Approval {
 }
 
 // ---------------------------------------------------------------------------
-// 7) status (device → cloud, relayed to UI)
+// proposal (device → cloud → UI) — ADAPTATION (generic "caught a change")
+// ---------------------------------------------------------------------------
+
+export interface AdaptationPayload {
+  proposal_id: string;
+  /** e.g. "swap Thursday to a 20-minute dinner". */
+  action: string;
+  detail: string;
+  /** What caused it, e.g. "calendar: recital added Thu 18:00". */
+  trigger: string;
+  tier: ApprovalTier;
+  requires_approval: boolean;
+}
+
+export interface Proposal {
+  type: "proposal";
+  goal_id: string;
+  correlation_id: string;
+  /** "adapting" when the agent caught a material change. */
+  task_status: TaskStatus;
+  payload: AdaptationPayload;
+}
+
+// ---------------------------------------------------------------------------
+// status (device → cloud → UI)
 // ---------------------------------------------------------------------------
 
 export interface ExecutedAction {
@@ -256,14 +347,14 @@ export interface ExecutedAction {
 }
 
 export interface StatusPayload {
-  executed?: ExecutedAction[];
-  note?: string;
-  /** Simulated weekday label, e.g. "Wed". */
+  /** Simulated weekday label, e.g. "Wed". Display derives from sim_date when present. */
   day?: string;
-  /** Simulated ISO date, e.g. "2026-07-15". */
+  /** Simulated ISO date, e.g. "2026-07-15" — GENERIC, derived from real today. */
   sim_date?: string;
   /** True when this tick needs user attention; false for quiet sustain checks. */
   material?: boolean;
+  executed?: ExecutedAction[];
+  note?: string;
 }
 
 export interface Status {
@@ -275,24 +366,50 @@ export interface Status {
 }
 
 // ---------------------------------------------------------------------------
+// control (UI → cloud → device) — demo clock controls
+// ---------------------------------------------------------------------------
+
+export type ControlCommand = "advance_day" | "reset" | "set_date";
+
+export interface ControlPayload {
+  /** ISO date — required for "set_date", absent otherwise. */
+  date?: string;
+}
+
+export interface Control {
+  type: "control";
+  goal_id: string;
+  command: ControlCommand;
+  payload: ControlPayload;
+}
+
+// ---------------------------------------------------------------------------
 // Discriminated unions
 // ---------------------------------------------------------------------------
 
-/** Every Contract v0 message. */
+/** Every CONTRACT v2 message. */
 export type ContractMessage =
   | Hello
   | HelloAck
+  | Capabilities
   | UserGoal
   | Dispatch
+  | AgentEvent
   | PlanReady
   | PresentPlan
-  | Proposal
   | Approval
-  | Control
-  | Status;
+  | Proposal
+  | Status
+  | Control;
 
 /** Messages the UI can RECEIVE from the cloud. */
-export type UiInboundMessage = HelloAck | PresentPlan | Proposal | Status;
+export type UiInboundMessage =
+  | HelloAck
+  | Capabilities
+  | AgentEvent
+  | PresentPlan
+  | Proposal
+  | Status;
 
 /** Messages the UI can SEND to the cloud. */
 export type UiOutboundMessage = Hello | UserGoal | Approval | Control;

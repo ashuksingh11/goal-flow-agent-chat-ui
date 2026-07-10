@@ -1,125 +1,347 @@
 /**
- * App — root layout + composition.
+ * App — root: owns the socket, the STREAMING STATE MACHINE, and the stage.
  *
- * M1: a single tablet chat surface.
+ * v2 component tree (docs/ARCHITECTURE.md is the spec):
  *   App
- *   └── ChatView            (transcript + input; owns the message list state)
- *       ├── PlanCard        (rendered inline for each present_plan)
- *       └── MicButton       (STT via Web Speech API — deferred stub)
+ *   ├── ProgressRail      — phase rail (agent_event:phase + task_status)
+ *   ├── stage
+ *   │   ├── GoalComposer  — input + MicButton (inline below)
+ *   │   ├── AgentStream   — thinking stream + tool-call chips (live)
+ *   │   ├── Skeleton      — plan silhouette while planning (no plan yet)
+ *   │   ├── PlanCard      — the plan hero (generic) + ProposalList (tiers)
+ *   │   ├── AdaptationCard— "caught a change" (proposal frames)
+ *   │   └── StatusTimeline— quiet sustain ticks (monitoring)
+ *   ├── DemoControls      — sim clock (generic dates + the v1 day-fix)
+ *   └── PresenterFeed     — raw WS frames ("Show agent flow" toggle)
  *
- * App owns the hub connection (lib/ws.ts createGoalFlowSocket) and passes
- * send/state down. Deferred: /hub display surface; "Show agent flow"
- * presenter toggle (see docs/ARCHITECTURE.md).
+ * All inbound frames flow through ONE pure reducer (reduceInbound) — the
+ * streaming-event → UI-state mapping lives there and nowhere else.
+ *
+ * SKELETON — state machine + composition are final; visual polish is TODO.
  */
 
-import { useEffect, useRef, useState } from "react";
-import { ChatView } from "./components/ChatView";
-import type { ChatEntry } from "./components/ChatView";
+import { useEffect, useReducer, useRef, useState } from "react";
+import { AdaptationCard } from "./components/AdaptationCard";
+import { AgentStream } from "./components/AgentStream";
+import { DemoControls } from "./components/DemoControls";
+import { MicButton } from "./components/MicButton";
+import { PlanCard } from "./components/PlanCard";
+import { PresenterFeed } from "./components/PresenterFeed";
+import { ProgressRail } from "./components/ProgressRail";
+import { Skeleton } from "./components/Skeleton";
+import { StatusTimeline } from "./components/StatusTimeline";
 import { createGoalFlowSocket } from "./lib/ws";
 import type { ConnectionState, GoalFlowSocket } from "./lib/ws";
 import type {
+  AgentEvent,
   ApprovalDecision,
-  ContractMessage,
+  CapabilityModule,
   ControlCommand,
+  PresentPlan,
+  Proposal,
   Status,
   UiInboundMessage,
   UiOutboundMessage,
 } from "./types/contract";
-import type { ProposalStatusMap } from "./types/ui";
+import {
+  INITIAL_DEMO_CLOCK,
+  mergeDemoClock,
+  railPhaseFromStatus,
+} from "./types/ui";
+import type {
+  AgentStreamEntry,
+  DemoClock,
+  DraftPlanItem,
+  FlowFrame,
+  ProposalStatusMap,
+  RailPhase,
+  TranscriptEntry,
+} from "./types/ui";
 
-export interface FlowFrame {
-  id: number;
-  direction: "sent" | "recv";
-  message: UiInboundMessage | UiOutboundMessage;
+// ---------------------------------------------------------------------------
+// Streaming state machine
+// ---------------------------------------------------------------------------
+
+interface UiState {
+  activeGoalId: string | null;
+  /** Current rail phase (null = idle, before the first goal). */
+  phase: RailPhase | null;
+  /** True while the device streams work (drives caret/chips/skeletons). */
+  working: boolean;
+  /** Device module registry (capabilities frame) — chips legend / debug. */
+  modules: CapabilityModule[] | null;
+  /** Reduced agent_event stream: thinking entries + tool chips. */
+  agentEntries: AgentStreamEntry[];
+  /** plan_progress drafts — progressively replace skeleton rows. */
+  draftItems: DraftPlanItem[];
+  /** The hero, once present_plan lands. */
+  plan: PresentPlan | null;
+  proposalStatuses: ProposalStatusMap;
+  adaptations: Proposal[];
+  /** Sustain ticks for StatusTimeline (capped). */
+  ticks: Status[];
+  demoClock: DemoClock;
+  transcript: TranscriptEntry[];
+  /** Raw feed for PresenterFeed (capped). */
+  frames: FlowFrame[];
+  /** Last applied agent_event seq (order/dedupe on reconnect). */
+  lastSeq: number;
+  nextId: number;
 }
+
+const INITIAL_STATE: UiState = {
+  activeGoalId: null,
+  phase: null,
+  working: false,
+  modules: null,
+  agentEntries: [],
+  draftItems: [],
+  plan: null,
+  proposalStatuses: {},
+  adaptations: [],
+  ticks: [],
+  demoClock: INITIAL_DEMO_CLOCK,
+  transcript: [],
+  frames: [],
+  lastSeq: 0,
+  nextId: 1,
+};
+
+type UiAction =
+  | { type: "recv"; message: UiInboundMessage }
+  | { type: "sent"; message: UiOutboundMessage }
+  | { type: "goal_submitted"; text: string }
+  | { type: "decisions_sent"; decisions: ApprovalDecision[] };
+
+const MAX_FRAMES = 120;
+const MAX_TICKS = 40;
+
+function pushFrame(state: UiState, direction: FlowFrame["direction"], message: FlowFrame["message"]): UiState {
+  const frame: FlowFrame = { id: state.nextId, direction, at: Date.now(), message };
+  return {
+    ...state,
+    nextId: state.nextId + 1,
+    frames: [...state.frames.slice(-(MAX_FRAMES - 1)), frame],
+  };
+}
+
+/** agent_event → live stream entries (the "watch it think" reduction). */
+function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
+  if (event.seq <= state.lastSeq) {
+    return state; // late/duplicate frame after reconnect — drop
+  }
+  const next: UiState = { ...state, lastSeq: event.seq, working: true };
+
+  switch (event.event) {
+    case "phase":
+      return { ...next, phase: event.payload.phase };
+
+    case "thinking": {
+      const last = next.agentEntries[next.agentEntries.length - 1];
+      if (last?.kind === "thinking") {
+        // consecutive fragments accumulate into one streaming line
+        const merged = { ...last, text: last.text + event.payload.text };
+        return { ...next, agentEntries: [...next.agentEntries.slice(0, -1), merged] };
+      }
+      return {
+        ...next,
+        nextId: next.nextId + 1,
+        agentEntries: [
+          ...next.agentEntries,
+          { kind: "thinking", id: next.nextId, text: event.payload.text },
+        ],
+      };
+    }
+
+    case "tool_call":
+      return {
+        ...next,
+        nextId: next.nextId + 1,
+        agentEntries: [
+          ...next.agentEntries,
+          {
+            kind: "chip",
+            id: next.nextId,
+            module: event.payload.module,
+            fn: event.payload.function,
+            state: "running",
+          },
+        ],
+      };
+
+    case "tool_result": {
+      // resolve the most recent RUNNING chip for this module.function
+      const entries = [...next.agentEntries];
+      for (let i = entries.length - 1; i >= 0; i -= 1) {
+        const entry = entries[i];
+        if (
+          entry.kind === "chip" &&
+          entry.state === "running" &&
+          entry.module === event.payload.module &&
+          entry.fn === event.payload.function
+        ) {
+          entries[i] = { ...entry, state: "done", summary: event.payload.summary };
+          break;
+        }
+      }
+      return { ...next, agentEntries: entries };
+    }
+
+    case "plan_progress":
+      return {
+        ...next,
+        draftItems: [
+          ...next.draftItems,
+          {
+            title: event.payload.item.title,
+            detail: event.payload.item.detail,
+            tags: event.payload.item.tags,
+          },
+        ],
+      };
+  }
+}
+
+/** The single inbound-frame → UI-state mapping (see ARCHITECTURE.md table). */
+function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
+  const withGoal =
+    "goal_id" in message && message.goal_id !== state.activeGoalId
+      ? { ...state, activeGoalId: message.goal_id }
+      : state;
+
+  switch (message.type) {
+    case "hello_ack":
+      return withGoal;
+
+    case "capabilities":
+      return { ...withGoal, modules: message.modules };
+
+    case "agent_event":
+      return reduceAgentEvent(withGoal, message);
+
+    case "present_plan":
+      return {
+        ...withGoal,
+        plan: message,
+        working: false,
+        draftItems: [],
+        phase: railPhaseFromStatus(message.task_status) ?? "awaiting_approval",
+      };
+
+    case "proposal":
+      return {
+        ...withGoal,
+        working: false,
+        adaptations: [...withGoal.adaptations, message],
+        phase: railPhaseFromStatus(message.task_status) ?? withGoal.phase,
+      };
+
+    case "status": {
+      let next: UiState = {
+        ...withGoal,
+        ticks: [...withGoal.ticks.slice(-(MAX_TICKS - 1)), message],
+        // THE DAY-UPDATE FIX: merge (never replace) the sim clock — frames
+        // without day/sim_date can no longer reset the label (v1 bug).
+        demoClock: mergeDemoClock(withGoal.demoClock, message.payload),
+        phase: railPhaseFromStatus(message.task_status) ?? withGoal.phase,
+      };
+      for (const executed of message.payload.executed ?? []) {
+        next = {
+          ...next,
+          proposalStatuses: {
+            ...next.proposalStatuses,
+            [executed.proposal_id]: {
+              state: "done",
+              approved: next.proposalStatuses[executed.proposal_id]?.approved ?? true,
+              detail: executed.detail || executed.result,
+            },
+          },
+        };
+      }
+      return next;
+    }
+  }
+}
+
+function reducer(state: UiState, action: UiAction): UiState {
+  switch (action.type) {
+    case "recv":
+      return reduceInbound(pushFrame(state, "recv", action.message), action.message);
+
+    case "sent":
+      return pushFrame(state, "sent", action.message);
+
+    case "goal_submitted":
+      // new goal resets the stage; rail lights "interpreting" immediately
+      // (the device's own phase events take over as they stream in)
+      return {
+        ...state,
+        nextId: state.nextId + 1,
+        transcript: [
+          ...state.transcript,
+          { kind: "goal", id: state.nextId, text: action.text },
+        ],
+        phase: "interpreting",
+        working: true,
+        agentEntries: [],
+        draftItems: [],
+        plan: null,
+        proposalStatuses: {},
+        adaptations: [],
+        ticks: [],
+        lastSeq: 0,
+      };
+
+    case "decisions_sent": {
+      const proposalStatuses = { ...state.proposalStatuses };
+      for (const decision of action.decisions) {
+        proposalStatuses[decision.proposal_id] = {
+          state: "pending",
+          approved: decision.approved,
+        };
+      }
+      return { ...state, proposalStatuses };
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// App
+// ---------------------------------------------------------------------------
 
 export default function App() {
   const socketRef = useRef<GoalFlowSocket | null>(null);
-  const frameIdRef = useRef(0);
-  const [connectionState, setConnectionState] = useState<ConnectionState>("connecting");
-  const [messages, setMessages] = useState<ChatEntry[]>([]);
-  const [frames, setFrames] = useState<FlowFrame[]>([]);
-  const [proposalStatuses, setProposalStatuses] = useState<ProposalStatusMap>({});
-  const [showAgentFlow, setShowAgentFlow] = useState(false);
-  const [activeGoalId, setActiveGoalId] = useState<string | null>(null);
-  const [currentTick, setCurrentTick] = useState<Status | null>(null);
-
-  const recordFrame = (direction: FlowFrame["direction"], message: FlowFrame["message"]) => {
-    const frame = { id: frameIdRef.current + 1, direction, message };
-    frameIdRef.current = frame.id;
-    setFrames((current) => [...current.slice(-79), frame]);
-  };
+  const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
+  const [connection, setConnection] = useState<ConnectionState>("connecting");
+  const [presenterMode, setPresenterMode] = useState(false);
 
   useEffect(() => {
-    const handleMessage = (message: UiInboundMessage) => {
-      recordFrame("recv", message);
-      setMessages((current) => [...current, { kind: "agent", message }]);
-
-      if ("goal_id" in message) {
-        setActiveGoalId(message.goal_id);
-      }
-
-      if (message.type === "status") {
-        setCurrentTick(message);
-      }
-
-      if (message.type === "status" && message.payload.executed) {
-        setProposalStatuses((current) => {
-          const next = { ...current };
-          for (const executed of message.payload.executed ?? []) {
-            const existing = next[executed.proposal_id];
-            next[executed.proposal_id] = {
-              state: "done",
-              approved: existing?.approved ?? true,
-              detail: executed.detail || executed.result,
-            };
-          }
-          return next;
-        });
-      }
-    };
-
     const socket = createGoalFlowSocket({
-      onMessage: handleMessage,
-      onSent: (message) => recordFrame("sent", message),
-      onStateChange: setConnectionState,
+      onMessage: (message) => dispatch({ type: "recv", message }),
+      onSent: (message) => dispatch({ type: "sent", message }),
+      onStateChange: setConnection,
     });
-
     socketRef.current = socket;
     socket.connect();
-
     return () => {
       socket.close();
       socketRef.current = null;
     };
   }, []);
 
-  const sendGoal = (text: string) => {
+  const submitGoal = (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed) {
-      return;
-    }
-
-    setMessages((current) => [...current, { kind: "user", text: trimmed }]);
+    if (!trimmed) return;
+    dispatch({ type: "goal_submitted", text: trimmed });
     socketRef.current?.send({ type: "user_goal", text: trimmed });
   };
 
-  const sendApproval = (
+  const sendDecisions = (
     goalId: string,
     correlationId: string,
     decisions: ApprovalDecision[],
   ) => {
-    setProposalStatuses((current) => {
-      const next = { ...current };
-      for (const decision of decisions) {
-        next[decision.proposal_id] = {
-          state: "pending",
-          approved: decision.approved,
-        };
-      }
-      return next;
-    });
-
+    dispatch({ type: "decisions_sent", decisions });
     socketRef.current?.send({
       type: "approval",
       goal_id: goalId,
@@ -128,181 +350,140 @@ export default function App() {
     });
   };
 
-  const sendControl = (command: ControlCommand) => {
-    if (!activeGoalId) {
-      return;
-    }
-
-    if (command === "reset") {
-      setCurrentTick(null);
-    }
-
+  const sendControl = (command: ControlCommand, payload?: { date?: string }) => {
+    if (!state.activeGoalId) return;
     socketRef.current?.send({
       type: "control",
-      goal_id: activeGoalId,
+      goal_id: state.activeGoalId,
       command,
-      payload: {},
+      payload: payload ?? {},
     });
   };
 
+  const planPending = state.working && !state.plan;
+
   return (
     <div className="app">
-      <header>
+      <header className="app-header">
         <div>
           <p className="eyebrow">GoalFlow</p>
-          <h1>Family dinner planning</h1>
+          <h1>Home agent</h1>
+          {/* TODO(M-impl): show active goal text / domain instead of static title */}
         </div>
-        <div className="header-actions">
-          <label className="agent-flow-toggle">
+        <div className="app-header__actions">
+          <label className="presenter-toggle">
             <input
               type="checkbox"
-              checked={showAgentFlow}
-              onChange={(event) => setShowAgentFlow(event.target.checked)}
+              checked={presenterMode}
+              onChange={(event) => setPresenterMode(event.target.checked)}
             />
             Show agent flow
           </label>
-          <span className={`connection-status connection-status--${connectionState}`}>
-            <span aria-hidden="true" />
-            {connectionState}
+          <span className={`connection-dot connection-dot--${connection}`}>
+            {connection}
           </span>
         </div>
       </header>
-      {activeGoalId ? (
-        <DemoControls currentTick={currentTick} onCommand={sendControl} />
-      ) : null}
-      <main className={showAgentFlow ? "main-layout main-layout--with-flow" : "main-layout"}>
-        <ChatView
-          messages={messages}
-          onSendGoal={sendGoal}
-          onApprove={sendApproval}
-          proposalStatuses={proposalStatuses}
-        />
-        {showAgentFlow ? <AgentFlowPanel frames={frames} /> : null}
+
+      <ProgressRail phase={state.phase} />
+
+      <main className={presenterMode ? "stage stage--with-feed" : "stage"}>
+        <section className="stage__main">
+          <GoalComposer onSubmit={submitGoal} disabled={connection !== "open"} />
+
+          {state.agentEntries.length > 0 || state.working ? (
+            <AgentStream entries={state.agentEntries} active={state.working} />
+          ) : null}
+
+          {planPending ? (
+            <>
+              {/* plan_progress drafts replace skeleton rows one by one */}
+              {state.draftItems.map((item, index) => (
+                <p key={index} className="draft-plan-item">
+                  {item.title}
+                </p>
+              ))}
+              <Skeleton
+                variant="plan-item"
+                count={Math.max(1, 4 - state.draftItems.length)}
+              />
+            </>
+          ) : null}
+
+          {state.plan ? (
+            <PlanCard
+              plan={state.plan}
+              proposalStatuses={state.proposalStatuses}
+              onDecide={(decisions) =>
+                sendDecisions(state.plan!.goal_id, state.plan!.correlation_id, decisions)
+              }
+            />
+          ) : null}
+
+          {state.adaptations.map((adaptation) => (
+            <AdaptationCard
+              key={adaptation.payload.proposal_id}
+              proposal={adaptation}
+              status={state.proposalStatuses[adaptation.payload.proposal_id]}
+              onDecide={(approved) =>
+                sendDecisions(adaptation.goal_id, adaptation.correlation_id, [
+                  { proposal_id: adaptation.payload.proposal_id, approved },
+                ])
+              }
+            />
+          ))}
+
+          {state.ticks.length > 0 ? <StatusTimeline ticks={state.ticks} /> : null}
+        </section>
+
+        {presenterMode ? <PresenterFeed frames={state.frames} /> : null}
       </main>
+
+      {state.activeGoalId ? (
+        <DemoControls clock={state.demoClock} onCommand={sendControl} />
+      ) : null}
     </div>
   );
 }
 
-function DemoControls({
-  currentTick,
-  onCommand,
+// ---------------------------------------------------------------------------
+// GoalComposer — the single input row (kept inline: it is App's only input)
+// ---------------------------------------------------------------------------
+
+function GoalComposer({
+  onSubmit,
+  disabled,
 }: {
-  currentTick: Status | null;
-  onCommand: (command: ControlCommand) => void;
+  onSubmit: (text: string) => void;
+  disabled: boolean;
 }) {
-  const currentDay = currentTick?.payload.day || "Mon";
-  const currentDate = formatSimDate(currentTick?.payload.sim_date);
-  const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+  const [draft, setDraft] = useState("");
+
+  const submit = () => {
+    onSubmit(draft);
+    setDraft("");
+  };
 
   return (
-    <section className="demo-controls" aria-label="Demo controls">
-      <div className="demo-controls__label">
-        <span className="eyebrow">Demo controls</span>
-        <strong>
-          {currentDay}
-          {currentDate ? ` ${currentDate}` : ""}
-        </strong>
-      </div>
-      <div className="demo-stepper" aria-label="Simulated week progress">
-        {weekDays.map((day) => (
-          <span
-            key={day}
-            className={day === currentDay ? "demo-step demo-step--active" : "demo-step"}
-          >
-            {day}
-          </span>
-        ))}
-      </div>
-      <div className="demo-controls__actions">
-        <button type="button" onClick={() => onCommand("advance_day")}>
-          Advance day ▶
-        </button>
-        <button type="button" className="secondary-button" onClick={() => onCommand("reset")}>
-          Reset week
-        </button>
-      </div>
-    </section>
+    <form
+      className="goal-composer"
+      onSubmit={(event) => {
+        event.preventDefault();
+        submit();
+      }}
+    >
+      <input
+        type="text"
+        value={draft}
+        placeholder="What should the home take care of?"
+        disabled={disabled}
+        onChange={(event) => setDraft(event.target.value)}
+      />
+      <MicButton onTranscript={onSubmit} disabled />
+      <button type="submit" disabled={disabled || !draft.trim()}>
+        Go
+      </button>
+      {/* TODO(M-impl): example-goal chips when idle (meal week / guest dinner) */}
+    </form>
   );
-}
-
-function AgentFlowPanel({ frames }: { frames: FlowFrame[] }) {
-  return (
-    <aside className="agent-flow-panel" aria-label="Live WebSocket message feed">
-      <div className="agent-flow-panel__header">
-        <p className="eyebrow">WS message feed</p>
-        <strong>{frames.length} frames</strong>
-      </div>
-      {frames.length === 0 ? (
-        <p className="agent-flow-empty">Waiting for traffic.</p>
-      ) : (
-        <ol className="agent-flow-list">
-          {frames.map((frame) => (
-            <li key={frame.id} className={`agent-flow-item agent-flow-item--${frame.direction}`}>
-              <span aria-hidden="true">{frame.direction === "sent" ? "▲" : "▼"}</span>
-              <div>
-                <strong>{frame.message.type}</strong>
-                <p>{describeFrame(frame)}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-      )}
-    </aside>
-  );
-}
-
-function describeFrame(frame: FlowFrame) {
-  const { message } = frame;
-
-  switch (message.type) {
-    case "hello":
-      return "UI → cloud handshake";
-    case "hello_ack":
-      return `cloud → UI session ${message.session_id}`;
-    case "user_goal":
-      return "user_goal → cloud";
-    case "present_plan":
-      return "device → plan_ready → cloud → UI";
-    case "proposal":
-      return `proposal ▼ ${message.payload.action}: ${message.payload.trigger}`;
-    case "approval":
-      return approvalLabel(message);
-    case "control":
-      return `control ▲ ${message.command} → cloud`;
-    case "status":
-      return statusLabel(message);
-    default:
-      return `${(message as ContractMessage).type} frame`;
-  }
-}
-
-function formatSimDate(value?: string) {
-  if (!value) {
-    return "";
-  }
-
-  const [, month, day] = value.match(/^(\d{4})-(\d{2})-(\d{2})$/) ?? [];
-  return month && day ? `${month}-${day}` : value;
-}
-
-function approvalLabel(message: Extract<UiOutboundMessage, { type: "approval" }>) {
-  const approvedCount = message.payload.decisions.filter((decision) => decision.approved).length;
-  const declinedCount = message.payload.decisions.length - approvedCount;
-  if (approvedCount > 0 && declinedCount === 0) {
-    return `approval ▲ adapt/approve ${approvedCount} → cloud`;
-  }
-  if (declinedCount > 0 && approvedCount === 0) {
-    return `approval ▲ decline ${declinedCount} → cloud`;
-  }
-  return `approval ▲ ${approvedCount} approved, ${declinedCount} declined → cloud`;
-}
-
-function statusLabel(message: Extract<UiInboundMessage, { type: "status" }>) {
-  const executedCount = message.payload.executed?.length ?? 0;
-  if (executedCount > 0) {
-    return `status ▼ ${executedCount} executed · ${message.task_status}`;
-  }
-  const day = message.payload.day ? `${message.payload.day} ` : "";
-  const material = message.payload.material ? "material" : "quiet";
-  return `status ▼ ${day}${message.task_status} · ${material}`;
 }
