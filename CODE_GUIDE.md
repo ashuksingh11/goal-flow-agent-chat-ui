@@ -1,79 +1,204 @@
-# Code Guide — goal-flow-agent-chat-ui
+# Code Guide — goal-flow-agent-chat-ui (v2)
 
-The **chat UI** is the tablet client of GoalFlow: a React + Vite + TypeScript app that talks to the
-cloud agent over WebSocket. It sends the user's goal, renders the plan as the hero of the screen,
-drives the human-in-the-loop approvals, and (for the demo) advances the simulated week. See
-`../goal-flow-agents/docs/SYSTEM_OVERVIEW.md` for the whole system.
+The v2 UI is the tablet client of the GoalFlow **general** goal agent: a "watch it think"
+stage that streams the agent's work live, renders the plan as the hero, hosts the tiered
+human-in-the-loop approval gate, and drives the demo's simulated clock. It consumes
+**CONTRACT v2** (canonical in the cloud repo; mirrored field-for-field in
+`src/types/contract.ts`) and is **domain-agnostic** end to end — no meal-specific field
+exists anywhere in the types or components; the same UI carries a meal week or a
+guest-dinner prep timeline purely as data.
 
-> **Note:** `README.md` describes M1 scope; this guide reflects the finished M1–M4 build.
+Spec: `docs/ARCHITECTURE.md`. Framing: `../goal-flow-agents/docs/V2_DESIGN_PROPOSAL.md`.
 
 ## File map
 
 ```
 index.html
-package.json                 # scripts: dev / build / preview
+package.json                 # scripts: dev / build (tsc -b && vite build) / preview
 .env.example                 # VITE_WS_URL=ws://localhost:8000/ws
 src/
-  main.tsx                   # React entry
-  App.tsx                    # owns the socket, transcript, WS-frame feed, demo controls  ← start here
-  lib/ws.ts                  # WebSocket wrapper: connect, send, reconnect, state
-  types/contract.ts          # TypeScript mirror of CONTRACT.md (discriminated unions)
-  components/
-    ChatView.tsx             # transcript, input, plan card, status/adaptation cards
-    PlanCard.tsx             # the plan hero: Knew line, dishes+why, proposal, safety chip, impact badges
-    MicButton.tsx            # speech-to-text stub (disabled; Web Speech API planned)
-  styles.css                 # warm palette; all component styles
-docs/ARCHITECTURE.md
+  main.tsx                   # StrictMode > ErrorBoundary > App
+  App.tsx                    # socket + THE streaming reducer + stage layout  ← start here
+  lib/ws.ts                  # createGoalFlowSocket: handshake, reconnect, validation
+  types/contract.ts          # CONTRACT v2 mirror (discriminated unions on `type`)
+  types/ui.ts                # reducer output vocabulary (NOT wire types)
+  styles.css                 # design tokens + every keyframe (CSS-only motion)
+  components/                # all presentational — props in, callbacks out
 ```
 
-## How it works
+## Component tree
 
-1. **`App.tsx`** creates the WebSocket via **`lib/ws.ts`** on load, sends `hello {role:"ui"}`, and
-   tracks connection state (the header **● Open/closed** indicator). It keeps three pieces of state:
-   the **transcript** (chat + cards), the raw **WS frame feed** (for presenter mode), and the current
-   **simulated day** (for demo controls).
-2. Sending the input dispatches a **`user_goal`** frame. Incoming frames are routed by `type`:
-   - **`present_plan`** → render a `PlanCard` (the hero).
-   - **`status`** → render an execution confirmation ("5 items added…") or a per-day sustain bubble
-     ("Tue — on track; reminder set").
-   - **`proposal`** (adapting) → render the prominent **"Schedule change caught"** adaptation card.
-3. **HITL:** Approve/Decline (and the adaptation's Adapt/Decline) send an **`approval`** frame; the
-   buttons disable after a decision and update when the confirming `status` arrives.
-4. **Demo controls:** the "DEMO CONTROLS" strip (shown once a plan is active) sends **`control`**
-   frames (`advance_day` / `reset`) and shows the current sim day.
-5. **Presenter mode:** the header **"Show agent flow"** toggle reveals a live **WS message feed**
-   (every frame with ▲ sent / ▼ received, its `type`, and a human label). Off by default → clean UX.
+```
+App                        — socket + streaming state machine (one pure reducer) + stage
+├── ProgressRail           — Interpreting → Grounding → Planning → Checking → Approval → Monitoring
+├── stage
+│   ├── GoalComposer       — input row (inline in App.tsx) + MicButton (STT stub)
+│   ├── AgentStream        — live thinking ticker + tool-call chips
+│   ├── Skeleton           — shimmering plan silhouette while planning
+│   ├── PlanCard           — the generic plan hero
+│   │   └── ProposalList   — tiered approvals (auto / light / firm)
+│   ├── AdaptationCard     — the loud "caught a change" card
+│   └── StatusTimeline     — quiet sustain ticks while monitoring
+├── DemoControls           — sim clock: derived day/date, week strip, Advance/Reset/Set date
+└── PresenterFeed          — raw WS frame feed ("Show agent flow" toggle)
+```
 
-## The "wow" pieces (where to look)
+Data flow is strictly down-props / up-callbacks; no state library. `main.tsx` wraps `App`
+in `ErrorBoundary` so one bad frame never blanks the app.
 
-- **`PlanCard.tsx`** — leads with the **"Knew:"** personalization line (from `present_plan.payload.knew`)
-  — this is the credibility/wow line ("evidence of understanding, not a progress bar"). Also renders
-  the **safety chip** and the **impact badges** (`payload.impact`).
-- **`ChatView.tsx`** — the calm per-day sustain statuses vs. the loud adaptation card is deliberate:
-  four quiet days, one smart Wednesday.
+## The socket (`lib/ws.ts`)
 
-## Types
+`createGoalFlowSocket()` opens ONE WebSocket to `VITE_WS_URL` (default
+`ws://localhost:8000/ws`), sends `hello {role:"ui"}` on open, and reconnects after 1.5 s on
+drop (re-sending `hello`). Inbound frames are JSON-parsed and validated against the set of
+UI-inbound `type`s (`hello_ack`, `capabilities`, `agent_event`, `present_plan`, `proposal`,
+`status`) — unknown frames are warned and dropped, never rendered. `onMessage` / `onSent` /
+`onStateChange` feed the App reducer, the presenter feed, and the header connection dot.
 
-`src/types/contract.ts` is the **TypeScript mirror of `CONTRACT.md`** — discriminated unions for
-inbound/outbound messages. All parsing/sending routes on the `type` field. Keep this file in sync
-with the canonical `CONTRACT.md` (in the cloud repo) and the C# mirror (device repo) when the
-protocol changes.
+## The streaming state machine (`App.tsx`)
+
+All inbound frames pass through **one pure reducer**, `reduceInbound` — the entire
+event→UI-state mapping lives there and nowhere else, so it's testable and the components
+stay dumb. `UiState` holds: `phase` (rail), `working`, `agentEntries` (thinking + chips),
+`draftItems`, `plan`, `proposalStatuses`, `adaptations`, `ticks`, `demoClock`, `frames`
+(presenter feed, capped at 120), and `lastSeq`.
+
+| Inbound frame | Reducer effect | What the user sees |
+|---|---|---|
+| `hello_ack` | frame feed only | connection dot turns green |
+| `capabilities` | store `modules` | (chips name real registry functions) |
+| `agent_event · phase` | `phase` ← payload | rail advances, active dot pulses |
+| `agent_event · thinking` | append/merge into the last thinking entry | reasoning line streams with a caret |
+| `agent_event · tool_call` | push chip `{module, fn, state:"running"}` | chip pops in (`chip-pop`) |
+| `agent_event · tool_result` | resolve the most recent *running* chip matching `module.function` | chip flips to ✓ + one-line summary |
+| `agent_event · plan_progress` | push a `DraftPlanItem` | one skeleton row is replaced by a real draft row |
+| `present_plan` | `plan` set, `working` off, drafts cleared, phase → `awaiting_approval` (via `task_status`) | **the hero animates in** (`card-enter`) over the dissolving skeleton |
+| `proposal` (adapting) | append to `adaptations`, phase from `task_status` | the AdaptationCard slides in with a glow |
+| `status` | tick appended (cap 40); **clock MERGED** (see below); `executed[]` flips proposals to `done`; phase from `task_status` | quiet timeline dot; approvals confirm; sim day advances |
+
+Ordering/dedupe: `agent_event.seq` is monotonic per goal — `reduceAgentEvent` drops
+`seq <= lastSeq` (late/duplicate frames after a reconnect). Consecutive `thinking` fragments
+merge into one accumulating entry.
+
+Outbound: `user_goal`, `approval`, and `control` are mirrored into the frame feed via
+`onSent`. Submitting a goal (`goal_submitted` action) **resets the stage** and optimistically
+lights "Interpreting" until the device's own phase events take over. Sending decisions
+(`decisions_sent`) marks those proposals `pending` optimistically — they flip to `done` only
+when a later `status.payload.executed[]` entry confirms them.
+
+Stage layout logic (in `App`'s render): `AgentStream` shows while there's no plan and the
+agent is working; `planPending = working && !plan` shows draft rows + `Skeleton` (count
+shrinks as drafts arrive: `max(1, 4 - drafts)`); `PlanCard` replaces both once `present_plan`
+lands; `DemoControls` appears once a goal is active.
+
+## The rail (`ProgressRail` + `types/ui.ts`)
+
+Six steps in `RAIL_PHASES`. Driven by `agent_event:phase` while working and by
+`railPhaseFromStatus(task_status)` on `present_plan`/`proposal`/`status` —
+`executing`/`monitoring`/`adapting`/`done` all fold into **Monitoring**. Per-step states:
+`done` (check), `active` (`rail-pulse`, connector filling), `todo` (dim). `phase === null`
+(before the first goal) renders the rail idle/dimmed.
+
+## The hero (`PlanCard`)
+
+Renders only the generic `PlanItem` shape — `title / detail / when? / why[] / tags[]`:
+
+1. **Knew line** — `payload.knew` (free-form key → value) as compact chips; the credibility
+   line. `knewValue()` renders only primitives/string lists — objects collapse to `""`
+   (defensive: a raw object child would crash React).
+2. **Safety chip** — `payload.safety`: green "Safety ✓ passed" or red "blocked" (violations
+   in the tooltip) — "LLM plans, code checks", rendered.
+3. **Plan items** — staggered entrance (`--i` index custom property); `when` formats via
+   `Intl` (invalid dates render nothing); `why[0]` is a collapsed `<details>` with the rest
+   inside; tags as pills. Minimal text by design.
+4. **Impact badges** — `payload.impact` `{label, value}` stat pills.
+5. **`ProposalList`** — the approval gate (below).
+
+The full `explanation` hides behind a collapsed "Why this plan" `<details>`.
+
+## Tiered approvals (`ProposalList`, `TIER_META` in `types/ui.ts`)
+
+Every `PlanProposal` carries `tier` (reversibility × cost × risk):
+
+| Tier | Meaning | Treatment |
+|---|---|---|
+| `auto` | reversible, already executed | muted row, inline ✓, **no buttons** ("Done automatically") |
+| `light` | cheap consent | compact row, one quiet **OK** |
+| `firm` | spends money / irreversible | heavy card: warm accent, the exact capability call rendered as `module.function · args summary`, explicit **Approve / Decline** |
+
+Decision lifecycle per proposal (`ProposalStatusMap`): *(none)* → `pending` (buttons vanish,
+"Waiting for confirmation") → `done` ("Added ✓ - detail" or "Declined"), confirmed **only**
+by a `status.payload.executed[]` entry — the UI renders the contract invariant literally:
+nothing above `auto` executes until the approval round-trips.
+
+`AdaptationCard` reuses the same tier treatment for a `proposal` frame's Adapt/Decline:
+trigger line ("Caught a change: calendar: recital added Thu 18:00") → action + detail →
+tier-weighted buttons → the same pending/confirmed states via `proposalStatuses`.
+
+## The generic sim clock (`DemoControls` + `DemoClock` in `types/ui.ts`)
+
+Three rules, enforced in code (this fixes the v1 bug where any status frame lacking
+`day`/`sim_date` snapped the label back to a hardcoded "Mon"):
+
+1. **Merge, never replace** — `mergeDemoClock` updates only the fields a status carries.
+2. **Derive, never hardcode** — `deriveClockDisplay` computes the weekday/date labels and
+   the Monday-start 7-day week strip from `sim_date` via `Intl` (local-safe ISO parsing);
+   before the first status it derives from the **real today**.
+3. **Device is the source of truth** — Advance day / Reset / Set date send `control` frames
+   (`advance_day` / `reset` / `set_date {date}` from a native date input); the strip is
+   **not optimistic** — it re-renders when the echoed `status` arrives, with a brief
+   "syncing" shimmer (auto-clears after 1.8 s) in between.
+
+## Presenter mode (`PresenterFeed`)
+
+The header "Show agent flow" toggle reveals every raw frame: direction (▲ sent / ▼ recv),
+`type`, terse human label (`describeFrame`). High-volume `agent_event · thinking` frames are
+collapsed into burst rows (`compactFrames`: "thinking burst · 12 frames · seq 3-14"). Off by
+default so the demo surface stays clean.
+
+## Defensive rendering
+
+- `ErrorBoundary` (class component, in `main.tsx`) catches render errors → compact fallback
+  + Dismiss, logs the component stack. One bad frame never blanks the app.
+- `ws.ts` drops frames whose `type` isn't a known UI-inbound type, and survives JSON parse
+  failures.
+- `PlanCard.knewValue` and `formatWhen`, `ProposalList.summarizeArgs`, and
+  `StatusTimeline.tickDay` all render `""`/nothing on malformed values instead of throwing.
+- Lists are capped: 120 presenter frames, 40 ticks (8 visible), 10 chips, thinking ticker
+  shows the last ~200 chars.
+
+## Styling & motion (`styles.css`)
+
+Design tokens on `:root`: deep-ink base `--bg: #0b0e14` with a radial glow, glass panels,
+one accent `--accent: #5b8cff`, semantics `--good` / `--warn: #ffb454` (firm tier) /
+`--danger: #ff6b6b`. Keyframes: `skeleton-shimmer`, `chip-pop`, `rail-pulse`, `card-enter`,
+`caret-blink`, `tick-appear`. Motion signals *agent momentum* only (something animates only
+when the agent did something); loading is the shape of the content, never a spinner;
+`prefers-reduced-motion` collapses all animation. **No motion library** — React + Vite + TS
+are the only dependencies.
 
 ## Run & verify
 
 ```bash
 cp -n .env.example .env         # VITE_WS_URL=ws://localhost:8000/ws
 npm install
-npm run build                   # tsc -b && vite build  (type-checks)
+npm run build                   # tsc -b && vite build (type-checks)
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-Open http://127.0.0.1:5173 (needs the cloud running on :8000).
+Open http://127.0.0.1:5173 (needs the cloud hub on :8000).
 
 ## Extending it
 
-- **Speech-to-text:** wire `MicButton.tsx` to the browser **Web Speech API** (it's a stub today).
-- **Second Hub surface:** the deferred `/hub` "Home Agent Activity" display can reuse the same WS
-  frames (device stages) as a display-only route.
-- **New message type:** add its type to `contract.ts`, handle it in `App.tsx`'s router, and render it
-  in `ChatView.tsx`.
+- **New message type:** add it to `contract.ts` (and the `UiInboundMessage` /
+  `UiOutboundMessage` unions), whitelist it in `ws.ts`'s `INBOUND_TYPES`, handle it in
+  `reduceInbound`, and render from the state it produces. Keep the mirror in sync with the
+  canonical CONTRACT v2 (cloud repo) and the C# mirror (device repo).
+- **New component:** keep it presentational — props from `UiState`, callbacks up to `App`;
+  put any new derived state in the reducer, not in the component.
+- **New agent_event kind:** extend the `AgentEvent` union (`event` discriminant) and add a
+  case to `reduceAgentEvent`; the exhaustive switch will flag it at compile time.
+- **Speech-to-text:** wire `MicButton.tsx` to the browser Web Speech API (in-browser only);
+  it already takes `onTranscript` and is rendered inside `GoalComposer`.
+- **New domain:** nothing to do — `PlanCard`/`ProposalList` render generic items, tiers,
+  and badges; a new domain is new data through the same frames.
