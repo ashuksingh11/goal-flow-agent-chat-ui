@@ -250,11 +250,20 @@ export interface ImpactBadge {
   value: string;
 }
 
+export interface DemoEvent {
+  id: string;
+  label: string;
+  title: string;
+  kind: string;
+  order: number;
+}
+
 export interface PlanPayload {
   plan: PlanItem[];
   proposals: PlanProposal[];
   safety: SafetyResult;
   impact: ImpactBadge[];
+  demo_events?: DemoEvent[];
   explanation: string;
 }
 
@@ -338,6 +347,8 @@ export interface AdaptationPayload {
   detail: string;
   /** What caused it, e.g. "calendar: recital added Thu 18:00". */
   trigger: string;
+  /** Presenter-fired demo event id that produced this proposal, when applicable. */
+  event_id?: string;
   tier: ApprovalTier;
   requires_approval: boolean;
   /** The proposed plan change (scoped daily adaptation). */
@@ -348,6 +359,7 @@ export interface Proposal {
   type: "proposal";
   goal_id: string;
   correlation_id: string;
+  event_id?: string;
   /** "adapting" when the agent caught a material change. */
   task_status: TaskStatus;
   payload: AdaptationPayload;
@@ -369,6 +381,8 @@ export interface StatusPayload {
   day?: string;
   /** Simulated ISO date, e.g. "2026-07-15" — GENERIC, derived from real today. */
   sim_date?: string;
+  /** Presenter-fired demo event id that produced this status, when applicable. */
+  event_id?: string;
   /** True when this tick needs user attention; false for quiet sustain checks. */
   material?: boolean;
   executed?: ExecutedAction[];
@@ -385,6 +399,7 @@ export interface Status {
   type: "status";
   goal_id: string;
   correlation_id: string;
+  event_id?: string;
   task_status: TaskStatus;
   payload: StatusPayload;
 }
@@ -393,17 +408,20 @@ export interface Status {
 // control (UI → cloud → device) — demo clock controls
 // ---------------------------------------------------------------------------
 
-export type ControlCommand = "advance_day" | "reset" | "set_date";
+export type ControlCommand = "advance_day" | "reset" | "set_date" | "trigger_event";
 
 export interface ControlPayload {
   /** ISO date — required for "set_date", absent otherwise. */
   date?: string;
+  /** Daily demo event id — required for "trigger_event". */
+  event_id?: string;
 }
 
 export interface Control {
   type: "control";
   goal_id: string;
   command: ControlCommand;
+  event_id?: string;
   payload: ControlPayload;
 }
 
