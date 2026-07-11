@@ -266,7 +266,12 @@ function markEventFired(state: UiState, eventId: string): UiState {
 
 function isPlanApproved(plan: PresentPlan | null, statuses: ProposalStatusMap): boolean {
   if (!plan) return false;
-  const approvalRequired = plan.payload.proposals.filter((proposal) => proposal.requires_approval);
+  // Only proposals the user must actually click gate the event strip. Auto-tier
+  // proposals are executed automatically (no approve button, see ProposalList),
+  // so including them here would leave the strip locked forever.
+  const approvalRequired = plan.payload.proposals.filter(
+    (proposal) => proposal.tier !== "auto" && proposal.requires_approval,
+  );
   if (approvalRequired.length === 0) return true;
   return approvalRequired.every(
     (proposal) => statuses[proposal.proposal_id]?.approved === true,
