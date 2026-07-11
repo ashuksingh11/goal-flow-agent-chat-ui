@@ -470,6 +470,29 @@ summary:focus-visible {
   animation: card-enter var(--dur-slow) var(--ease-out) both;
   animation-delay: calc(var(--i) * 55ms);
 }
+/* a row an approved daily adaptation just changed — accent edge + one-shot flash */
+.plan-item--changed {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 0 var(--accent);
+  animation: plan-item-flash 1.4s var(--ease-out) both;
+}
+@keyframes plan-item-flash {
+  0%   { background: var(--accent-soft); }
+  100% { background: var(--bg-raise); }
+}
+.plan-item__updated-badge {
+  flex: none;
+  align-self: center;
+  margin-left: auto;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 0.12rem 0.45rem;
+}
 .plan-item__topline {
   display: flex;
   justify-content: space-between;
@@ -646,6 +669,22 @@ summary:focus-visible {
   font-weight: 700;
 }
 .adaptation-card__detail { color: var(--ink-dim); font-size: 0.9rem; }
+.adaptation-card__patch {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  background: var(--bg-raise);
+  border: 1px dashed var(--stroke);
+  border-radius: var(--radius-m);
+  font-size: 0.85rem;
+}
+.adaptation-card__patch-row { display: flex; gap: 0.5rem; align-items: baseline; }
+.adaptation-card__patch-mark { flex: none; font-weight: 800; color: var(--accent); }
+.adaptation-card__patch-row--remove { color: var(--ink-faint); text-decoration: line-through; }
+.adaptation-card__patch-row--remove .adaptation-card__patch-mark { color: var(--danger); }
 .adaptation-card__actions { display: flex; gap: 0.5rem; margin-top: 0.4rem; }
 .adaptation-card__state {
   color: var(--good);

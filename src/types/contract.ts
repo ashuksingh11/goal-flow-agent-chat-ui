@@ -315,6 +315,22 @@ export interface Approval {
 // proposal (device → cloud → UI) — ADAPTATION (generic "caught a change")
 // ---------------------------------------------------------------------------
 
+/**
+ * A minimal plan diff from the scoped daily-adaptation LLM call. Rides inside a
+ * proposal as a PREVIEW; once approved it is applied and the full updated plan
+ * comes back in the status (`updated_plan`).
+ */
+export interface PlanPatch {
+  /** Rows to insert or replace, matched by id (a swapped dinner, a new prep task). */
+  upsert: PlanItem[];
+  /** Plan-item ids to drop. */
+  remove: string[];
+  /** Impact badges to add/replace on the plan card. */
+  impact_delta: ImpactBadge[];
+  /** One-line rationale for the change. */
+  rationale?: string;
+}
+
 export interface AdaptationPayload {
   proposal_id: string;
   /** e.g. "swap Thursday to a 20-minute dinner". */
@@ -324,6 +340,8 @@ export interface AdaptationPayload {
   trigger: string;
   tier: ApprovalTier;
   requires_approval: boolean;
+  /** The proposed plan change (scoped daily adaptation). */
+  patch?: PlanPatch;
 }
 
 export interface Proposal {
@@ -354,6 +372,12 @@ export interface StatusPayload {
   /** True when this tick needs user attention; false for quiet sustain checks. */
   material?: boolean;
   executed?: ExecutedAction[];
+  /** After an approved daily adaptation: the FULL updated plan (replaces the card). */
+  updated_plan?: PlanItem[];
+  /** Ids in `updated_plan` this adaptation changed — the UI highlights them. */
+  changed_ids?: string[];
+  /** Impact badges to add/replace on the plan card after the adaptation. */
+  impact_delta?: ImpactBadge[];
   note?: string;
 }
 

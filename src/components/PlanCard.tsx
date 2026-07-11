@@ -27,6 +27,8 @@ import { ProposalList } from "./ProposalList";
 
 export interface PlanCardProps {
   plan: PresentPlan;
+  /** Ids changed by the most recent approved daily adaptation — highlighted. */
+  changedIds?: string[];
   proposalStatuses: ProposalStatusMap;
   onDecide: (decisions: ApprovalDecision[]) => void;
 }
@@ -52,8 +54,9 @@ function knewValue(value: unknown): string {
   return String(value);
 }
 
-export function PlanCard({ plan, proposalStatuses, onDecide }: PlanCardProps) {
+export function PlanCard({ plan, changedIds = [], proposalStatuses, onDecide }: PlanCardProps) {
   const { payload } = plan;
+  const changed = new Set(changedIds);
 
   return (
     <article className="plan-card" aria-label="Proposed plan">
@@ -90,11 +93,14 @@ export function PlanCard({ plan, proposalStatuses, onDecide }: PlanCardProps) {
         {payload.plan.map((item, index) => (
           <li
             key={item.id}
-            className="plan-item"
+            className={changed.has(item.id) ? "plan-item plan-item--changed" : "plan-item"}
             style={{ "--i": index } as CSSProperties}
           >
             <div className="plan-item__topline">
               <strong className="plan-item__title">{item.title}</strong>
+              {changed.has(item.id) ? (
+                <span className="plan-item__updated-badge">Updated</span>
+              ) : null}
               {formatWhen(item.when) ? (
                 <time className="plan-item__when" dateTime={item.when}>
                   {formatWhen(item.when)}

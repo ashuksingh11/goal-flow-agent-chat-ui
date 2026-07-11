@@ -39,6 +39,25 @@ export function AdaptationCard({ proposal, status, onDecide }: AdaptationCardPro
       <span className="adaptation-card__tier">{meta.label}</span>
       <p className="adaptation-card__action">{payload.action}</p>
       <p className="adaptation-card__detail">{payload.detail}</p>
+      {payload.patch ? (
+        <ul className="adaptation-card__patch" aria-label="Proposed plan change">
+          {payload.patch.upsert.map((row) => (
+            <li key={row.id} className="adaptation-card__patch-row adaptation-card__patch-row--upsert">
+              <span className="adaptation-card__patch-mark">→</span>
+              <span>
+                <strong>{row.title}</strong>
+                {row.detail ? ` — ${row.detail}` : ""}
+              </span>
+            </li>
+          ))}
+          {payload.patch.remove.map((id) => (
+            <li key={id} className="adaptation-card__patch-row adaptation-card__patch-row--remove">
+              <span className="adaptation-card__patch-mark">✕</span>
+              <span>Remove {id}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {payload.requires_approval && !status ? (
         <div className="adaptation-card__actions">
           <button

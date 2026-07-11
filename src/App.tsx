@@ -37,6 +37,7 @@ import type {
   ApprovalDecision,
   CapabilityModule,
   ControlCommand,
+  ImpactBadge,
   PresentPlan,
   Proposal,
   Status,
@@ -76,8 +77,10 @@ interface UiState {
   agentEntries: AgentStreamEntry[];
   /** plan_progress drafts — progressively replace skeleton rows. */
   draftItems: DraftPlanItem[];
-  /** The hero, once present_plan lands. */
+  /** The hero, once present_plan lands. Patched in place by daily adaptations. */
   plan: PresentPlan | null;
+  /** Plan-item ids changed by the most recent approved adaptation (highlight). */
+  changedPlanIds: string[];
   proposalStatuses: ProposalStatusMap;
   adaptations: Proposal[];
   /** Sustain ticks for StatusTimeline (capped). */
@@ -99,6 +102,7 @@ const INITIAL_STATE: UiState = {
   agentEntries: [],
   draftItems: [],
   plan: null,
+  changedPlanIds: [],
   proposalStatuses: {},
   adaptations: [],
   ticks: [],
@@ -210,6 +214,14 @@ function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
   }
 }
 
+/** Merge adaptation impact badges into the plan's existing set, replacing by label. */
+function mergeImpact(current: ImpactBadge[], delta: ImpactBadge[]): ImpactBadge[] {
+  if (delta.length === 0) return current;
+  const byLabel = new Map(current.map((b) => [b.label, b]));
+  for (const b of delta) byLabel.set(b.label, b);
+  return [...byLabel.values()];
+}
+
 /** The single inbound-frame → UI-state mapping (see ARCHITECTURE.md table). */
 function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
   const withGoal =
@@ -253,6 +265,24 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         demoClock: mergeDemoClock(withGoal.demoClock, message.payload),
         phase: railPhaseFromStatus(message.task_status) ?? withGoal.phase,
       };
+      // A daily adaptation was approved → replace the plan in place with the
+      // patched plan, merge its impact badges, and mark the changed rows so the
+      // card can highlight them. Everything else about the card is preserved.
+      const updated = message.payload.updated_plan;
+      if (updated && updated.length > 0 && next.plan) {
+        next = {
+          ...next,
+          plan: {
+            ...next.plan,
+            payload: {
+              ...next.plan.payload,
+              plan: updated,
+              impact: mergeImpact(next.plan.payload.impact, message.payload.impact_delta ?? []),
+            },
+          },
+          changedPlanIds: message.payload.changed_ids ?? [],
+        };
+      }
       for (const executed of message.payload.executed ?? []) {
         next = {
           ...next,
@@ -423,6 +453,7 @@ export default function App() {
           {state.plan ? (
             <PlanCard
               plan={state.plan}
+              changedIds={state.changedPlanIds}
               proposalStatuses={state.proposalStatuses}
               onDecide={(decisions) =>
                 sendDecisions(state.plan!.goal_id, state.plan!.correlation_id, decisions)
