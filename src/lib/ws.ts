@@ -95,23 +95,35 @@ export function createGoalFlowSocket(options: GoalFlowSocketOptions): GoalFlowSo
     deliberatelyClosed = false;
     setState("connecting");
 
+    let ws: WebSocket;
     try {
-      socket = new WebSocket(url);
+      ws = new WebSocket(url);
     } catch (error) {
       console.error("Failed to create GoalFlow WebSocket", error);
       setState("closed");
       scheduleReconnect();
       return;
     }
+    socket = ws;
 
-    socket.addEventListener("open", () => {
+    // Ignore events from a socket that is no longer the current one. Without
+    // this, a stale socket's late close/error event (e.g. from a React
+    // StrictMode double-mount cleanup, or an error event that races the open)
+    // would trigger a reconnect on top of a healthy socket — and with the
+    // cloud's one-socket-per-role registry, the two would evict each other in
+    // an endless connect→hello→evict→reconnect storm.
+    const isCurrent = () => socket === ws;
+
+    ws.addEventListener("open", () => {
+      if (!isCurrent()) return;
       setState("open");
       const hello = { type: "hello", role: "ui" } satisfies UiOutboundMessage;
-      socket?.send(JSON.stringify(hello));
+      ws.send(JSON.stringify(hello));
       options.onSent?.(hello);
     });
 
-    socket.addEventListener("message", (event) => {
+    ws.addEventListener("message", (event) => {
+      if (!isCurrent()) return;
       try {
         const parsed: unknown = JSON.parse(String(event.data));
         if (isUiInboundMessage(parsed)) {
@@ -125,14 +137,27 @@ export function createGoalFlowSocket(options: GoalFlowSocketOptions): GoalFlowSo
       }
     });
 
-    socket.addEventListener("close", () => {
+    ws.addEventListener("close", (event) => {
+      if (!isCurrent()) return; // a stale/replaced socket closing — not our concern
       socket = null;
       setState("closed");
+      // 1012 = the cloud replaced this socket with a NEWER "ui" connection (a
+      // duplicate tab, a StrictMode double-mount, or another client taking the
+      // single ui slot). Reconnecting would just get evicted again → an endless
+      // eviction storm between the two sockets. Let the newest socket own the
+      // slot; only reconnect on unexpected transport drops (e.g. 1006).
+      if (event.code === 1012) {
+        return;
+      }
       scheduleReconnect();
     });
 
-    socket.addEventListener("error", () => {
-      socket?.close();
+    // An `error` event is always followed by a `close` event — let close() drive
+    // the single reconnect. Closing here as well raced the reconnect and, with a
+    // spurious error event, produced a second socket that stormed.
+    ws.addEventListener("error", () => {
+      if (!isCurrent()) return;
+      console.warn("GoalFlow socket error; awaiting close");
     });
   };
 
