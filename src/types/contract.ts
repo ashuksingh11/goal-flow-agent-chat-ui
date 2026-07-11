@@ -44,7 +44,7 @@ export type TaskStatus =
  * - "light": quick consent (e.g. add to shopping list)
  * - "firm":  spends money / irreversible — explicit, visually heavy approval
  */
-export type ApprovalTier = "auto" | "light" | "firm";
+export type ApprovalTier = "auto" | "light" | "firm" | "adapt";
 
 // ---------------------------------------------------------------------------
 // Handshake

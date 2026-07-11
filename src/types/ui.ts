@@ -141,6 +141,7 @@ export const TIER_META: Record<
   auto: { label: "Done automatically", weight: "done" },
   light: { label: "Quick OK", weight: "light" },
   firm: { label: "Needs your approval", weight: "heavy" },
+  adapt: { label: "Adapt", weight: "light" },
 };
 
 // ---------------------------------------------------------------------------

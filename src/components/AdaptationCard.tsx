@@ -23,7 +23,7 @@ export interface AdaptationCardProps {
 
 export function AdaptationCard({ proposal, status, onDecide }: AdaptationCardProps) {
   const { payload } = proposal;
-  const meta = TIER_META[payload.tier];
+  const meta = TIER_META[payload.tier] ?? { label: "Adapt", weight: "light" as const };
   const confirmed = status?.state === "done";
   const pending = status?.state === "pending";
 
