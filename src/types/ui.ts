@@ -54,6 +54,45 @@ export function railPhaseFromStatus(status: TaskStatus): RailPhase | null {
   }
 }
 
+/**
+ * Fold a raw device `agent_event {phase}` string onto the rail vocabulary. The
+ * device streams phases the rail doesn't render as their own step — `executing`,
+ * `adapting`, `done` all belong to Monitoring. Returns null for anything
+ * unrecognized so the caller can KEEP the current phase rather than collapse the
+ * rail to empty (a raw unknown value made findIndex return -1, unfilling every
+ * step — the source of the left-to-right "flicker").
+ */
+export function railPhaseFromAgentPhase(raw: string): RailPhase | null {
+  switch (raw) {
+    case "interpreting":
+    case "grounding":
+    case "planning":
+    case "checking":
+    case "awaiting_approval":
+    case "monitoring":
+      return raw;
+    case "executing":
+    case "adapting":
+    case "done":
+      return "monitoring";
+    default:
+      return null;
+  }
+}
+
+/**
+ * The later of two rail phases. Keeps the rail MONOTONIC within a goal so the
+ * fill only ever advances left→right and never jumps backward mid-stream (a new
+ * goal resets the phase explicitly, outside this helper).
+ */
+export function maxRailPhase(a: RailPhase | null, b: RailPhase | null): RailPhase | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  const ai = RAIL_PHASES.findIndex((p) => p.id === a);
+  const bi = RAIL_PHASES.findIndex((p) => p.id === b);
+  return bi > ai ? b : a;
+}
+
 // ---------------------------------------------------------------------------
 // Agent stream (thinking + tool-call chips)
 // ---------------------------------------------------------------------------

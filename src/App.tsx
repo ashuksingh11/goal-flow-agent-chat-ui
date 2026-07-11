@@ -46,6 +46,8 @@ import type {
 import {
   INITIAL_DEMO_CLOCK,
   mergeDemoClock,
+  maxRailPhase,
+  railPhaseFromAgentPhase,
   railPhaseFromStatus,
 } from "./types/ui";
 import type {
@@ -133,8 +135,14 @@ function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
   const next: UiState = { ...state, lastSeq: event.seq, working: true };
 
   switch (event.event) {
-    case "phase":
-      return { ...next, phase: event.payload.phase };
+    case "phase": {
+      // Fold the raw device phase onto the rail vocabulary and only ever advance
+      // (never regress) — an unrecognized/terminal phase used to collapse the rail
+      // and flicker. Unknown → keep the current phase.
+      const incoming = railPhaseFromAgentPhase(event.payload.phase);
+      if (incoming === null) return next;
+      return { ...next, phase: maxRailPhase(next.phase, incoming) };
+    }
 
     case "thinking": {
       const last = next.agentEntries[next.agentEntries.length - 1];
