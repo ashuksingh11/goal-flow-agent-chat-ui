@@ -24,6 +24,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import { AdaptationCard } from "./components/AdaptationCard";
 import { AgentStream } from "./components/AgentStream";
 import { DemoControls } from "./components/DemoControls";
+import { EventStrip } from "./components/EventStrip";
 import { MicButton } from "./components/MicButton";
 import { PlanCard } from "./components/PlanCard";
 import { PresenterFeed } from "./components/PresenterFeed";
@@ -37,6 +38,7 @@ import type {
   ApprovalDecision,
   CapabilityModule,
   ControlCommand,
+  ControlPayload,
   ImpactBadge,
   PresentPlan,
   Proposal,
@@ -54,6 +56,7 @@ import {
 import type {
   AgentStreamEntry,
   DemoClock,
+  EventChip,
   DraftPlanItem,
   FlowFrame,
   ProposalStatusMap,
@@ -79,10 +82,17 @@ interface UiState {
   draftItems: DraftPlanItem[];
   /** The hero, once present_plan lands. Patched in place by daily adaptations. */
   plan: PresentPlan | null;
+  /** The original plan_ready payload, restored by Reset week. */
+  pristinePlan: PresentPlan | null;
   /** Plan-item ids changed by the most recent approved adaptation (highlight). */
   changedPlanIds: string[];
   proposalStatuses: ProposalStatusMap;
   adaptations: Proposal[];
+  eventChips: EventChip[];
+  firedEventIds: string[];
+  firingEventId: string | null;
+  /** Unlocks the world-event strip after the user approves the initial plan. */
+  approved: boolean;
   /** Sustain ticks for StatusTimeline (capped). */
   ticks: Status[];
   demoClock: DemoClock;
@@ -102,9 +112,14 @@ const INITIAL_STATE: UiState = {
   agentEntries: [],
   draftItems: [],
   plan: null,
+  pristinePlan: null,
   changedPlanIds: [],
   proposalStatuses: {},
   adaptations: [],
+  eventChips: [],
+  firedEventIds: [],
+  firingEventId: null,
+  approved: false,
   ticks: [],
   demoClock: INITIAL_DEMO_CLOCK,
   transcript: [],
@@ -117,7 +132,10 @@ type UiAction =
   | { type: "recv"; message: UiInboundMessage }
   | { type: "sent"; message: UiOutboundMessage }
   | { type: "goal_submitted"; text: string }
-  | { type: "decisions_sent"; decisions: ApprovalDecision[] };
+  | { type: "decisions_sent"; decisions: ApprovalDecision[] }
+  | { type: "event_fired"; eventId: string }
+  | { type: "event_timeout"; eventId: string }
+  | { type: "demo_reset" };
 
 const MAX_FRAMES = 120;
 const MAX_TICKS = 40;
@@ -222,6 +240,39 @@ function mergeImpact(current: ImpactBadge[], delta: ImpactBadge[]): ImpactBadge[
   return [...byLabel.values()];
 }
 
+function buildEventChips(plan: PresentPlan): EventChip[] {
+  return [...(plan.payload.demo_events ?? [])]
+    .sort((a, b) => a.order - b.order)
+    .map((event) => ({ event, state: "idle" }));
+}
+
+function inboundEventId(message: Proposal | Status): string | undefined {
+  return message.payload.event_id ?? message.event_id;
+}
+
+function markEventFired(state: UiState, eventId: string): UiState {
+  if (!state.eventChips.some((chip) => chip.event.id === eventId)) return state;
+  return {
+    ...state,
+    eventChips: state.eventChips.map((chip) =>
+      chip.event.id === eventId ? { ...chip, state: "fired" } : chip,
+    ),
+    firedEventIds: state.firedEventIds.includes(eventId)
+      ? state.firedEventIds
+      : [...state.firedEventIds, eventId],
+    firingEventId: state.firingEventId === eventId ? null : state.firingEventId,
+  };
+}
+
+function isPlanApproved(plan: PresentPlan | null, statuses: ProposalStatusMap): boolean {
+  if (!plan) return false;
+  const approvalRequired = plan.payload.proposals.filter((proposal) => proposal.requires_approval);
+  if (approvalRequired.length === 0) return true;
+  return approvalRequired.every(
+    (proposal) => statuses[proposal.proposal_id]?.approved === true,
+  );
+}
+
 /** The single inbound-frame → UI-state mapping (see ARCHITECTURE.md table). */
 function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
   const withGoal =
@@ -243,18 +294,27 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
       return {
         ...withGoal,
         plan: message,
+        pristinePlan: message,
         working: false,
         draftItems: [],
+        changedPlanIds: [],
+        eventChips: buildEventChips(message),
+        firedEventIds: [],
+        firingEventId: null,
+        approved: isPlanApproved(message, {}),
         phase: railPhaseFromStatus(message.task_status) ?? "awaiting_approval",
       };
 
-    case "proposal":
-      return {
+    case "proposal": {
+      const next = {
         ...withGoal,
         working: false,
         adaptations: [...withGoal.adaptations, message],
         phase: railPhaseFromStatus(message.task_status) ?? withGoal.phase,
       };
+      const eventId = inboundEventId(message);
+      return eventId ? markEventFired(next, eventId) : next;
+    }
 
     case "status": {
       let next: UiState = {
@@ -296,6 +356,11 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
           },
         };
       }
+      next = { ...next, approved: isPlanApproved(next.plan, next.proposalStatuses) };
+      const eventId = inboundEventId(message);
+      if (eventId) {
+        next = markEventFired(next, eventId);
+      }
       return next;
     }
   }
@@ -324,8 +389,13 @@ function reducer(state: UiState, action: UiAction): UiState {
         agentEntries: [],
         draftItems: [],
         plan: null,
+        pristinePlan: null,
         proposalStatuses: {},
         adaptations: [],
+        eventChips: [],
+        firedEventIds: [],
+        firingEventId: null,
+        approved: false,
         ticks: [],
         lastSeq: 0,
       };
@@ -338,8 +408,50 @@ function reducer(state: UiState, action: UiAction): UiState {
           approved: decision.approved,
         };
       }
-      return { ...state, proposalStatuses };
+      // The event strip unlocks once the user has approved every approval-required
+      // proposal on the initial plan. Pending approvals count because the user
+      // has acted on the plan CTA; later status frames only confirm execution.
+      return { ...state, proposalStatuses, approved: isPlanApproved(state.plan, proposalStatuses) };
     }
+
+    case "event_fired":
+      if (state.firingEventId || state.firedEventIds.includes(action.eventId) || !state.approved) {
+        return state;
+      }
+      return {
+        ...state,
+        firingEventId: action.eventId,
+        eventChips: state.eventChips.map((chip) =>
+          chip.event.id === action.eventId ? { ...chip, state: "firing" } : chip,
+        ),
+      };
+
+    case "event_timeout":
+      if (state.firingEventId !== action.eventId) return state;
+      return {
+        ...state,
+        firingEventId: null,
+        eventChips: state.eventChips.map((chip) =>
+          chip.event.id === action.eventId ? { ...chip, state: "idle" } : chip,
+        ),
+      };
+
+    case "demo_reset":
+      return {
+        ...state,
+        plan: state.pristinePlan,
+        changedPlanIds: [],
+        proposalStatuses: {},
+        adaptations: [],
+        eventChips: state.pristinePlan ? buildEventChips(state.pristinePlan) : [],
+        firedEventIds: [],
+        firingEventId: null,
+        approved: false,
+        ticks: [],
+        demoClock: INITIAL_DEMO_CLOCK,
+        working: false,
+        phase: state.pristinePlan ? "awaiting_approval" : state.phase,
+      };
   }
 }
 
@@ -388,17 +500,39 @@ export default function App() {
     });
   };
 
-  const sendControl = (command: ControlCommand, payload?: { date?: string }) => {
+  const sendControl = (command: ControlCommand, payload?: ControlPayload) => {
     if (!state.activeGoalId) return;
     socketRef.current?.send({
       type: "control",
       goal_id: state.activeGoalId,
       command,
+      event_id: payload?.event_id,
       payload: payload ?? {},
     });
   };
 
+  useEffect(() => {
+    if (!state.firingEventId) return;
+    const eventId = state.firingEventId;
+    const timeout = window.setTimeout(() => {
+      dispatch({ type: "event_timeout", eventId });
+    }, 30000);
+    return () => window.clearTimeout(timeout);
+  }, [state.firingEventId]);
+
+  const fireEvent = (eventId: string) => {
+    if (!state.approved || state.firingEventId || state.firedEventIds.includes(eventId)) return;
+    dispatch({ type: "event_fired", eventId });
+    sendControl("trigger_event", { event_id: eventId });
+  };
+
+  const resetWeek = () => {
+    sendControl("reset");
+    dispatch({ type: "demo_reset" });
+  };
+
   const planPending = state.working && !state.plan;
+  const hasEventStrip = (state.plan?.payload.demo_events?.length ?? 0) > 0;
 
   return (
     <div className="app">
@@ -480,7 +614,16 @@ export default function App() {
         {presenterMode ? <PresenterFeed frames={state.frames} /> : null}
       </main>
 
-      {state.activeGoalId ? (
+      {hasEventStrip && state.plan ? (
+        <EventStrip
+          events={state.plan.payload.demo_events ?? []}
+          enabled={state.approved}
+          firedIds={state.firedEventIds}
+          firingId={state.firingEventId}
+          onFire={fireEvent}
+          onReset={resetWeek}
+        />
+      ) : state.activeGoalId ? (
         <DemoControls clock={state.demoClock} onCommand={sendControl} />
       ) : null}
     </div>

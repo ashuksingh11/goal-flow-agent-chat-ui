@@ -742,6 +742,99 @@ summary:focus-visible {
 
 /* ---------------------------- demo controls ------------------------------ */
 
+.event-strip {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-m);
+  background: var(--bg-raise);
+}
+.event-strip__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex: none;
+}
+.event-strip__hint {
+  display: block;
+  color: var(--ink-faint);
+  font-size: 0.78rem;
+  margin-top: 0.1rem;
+}
+.event-strip__chips {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.event-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 38px;
+  max-width: min(100%, 260px);
+  padding: 0.4rem 0.7rem;
+  border-color: var(--stroke);
+  background: transparent;
+}
+.event-chip__label {
+  color: var(--ink-faint);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.event-chip__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.event-chip__glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 1rem;
+  min-width: 1rem;
+  color: var(--good);
+  font-weight: 800;
+}
+.event-chip--locked {
+  color: var(--ink-dim);
+  background: rgba(255, 255, 255, 0.02);
+}
+.event-chip--idle {
+  color: var(--ink);
+}
+.event-chip--firing {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.event-chip--firing .event-chip__title {
+  background: linear-gradient(90deg, var(--ink), var(--accent), var(--ink));
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: skeleton-shimmer 1.1s linear infinite;
+}
+.event-chip--fired {
+  background: var(--accent-soft);
+  color: var(--ink-dim);
+}
+.event-chip__spinner {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: rail-pulse 1.2s var(--ease-out) infinite;
+}
+.event-strip__reset {
+  white-space: nowrap;
+}
+
 .demo-controls {
   display: flex;
   align-items: center;
@@ -822,10 +915,23 @@ summary:focus-visible {
   .rail-step {
     min-width: 128px;
   }
+  .event-strip,
   .demo-controls {
     align-items: stretch;
     flex-direction: column;
     gap: 0.7rem;
+  }
+  .event-strip__header {
+    width: 100%;
+  }
+  .event-strip__chips {
+    flex: none;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 0.1rem;
+  }
+  .event-chip {
+    flex: 0 0 auto;
   }
   .demo-week {
     flex: none;

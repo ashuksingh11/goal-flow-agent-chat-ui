@@ -8,6 +8,7 @@
 
 import type {
   ApprovalTier,
+  DemoEvent,
   TaskStatus,
   UiInboundMessage,
   UiOutboundMessage,
@@ -121,6 +122,17 @@ export interface DraftPlanItem {
   title: string;
   detail?: string;
   tags?: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Event strip
+// ---------------------------------------------------------------------------
+
+export type EventChipState = "idle" | "firing" | "fired";
+
+export interface EventChip {
+  event: DemoEvent;
+  state: EventChipState;
 }
 
 // ---------------------------------------------------------------------------
