@@ -29,6 +29,7 @@ const INBOUND_TYPES = new Set([
   "hello_ack",
   "capabilities",
   "agent_event",
+  "understanding",
   "present_plan",
   "proposal",
   "status",

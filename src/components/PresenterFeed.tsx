@@ -39,6 +39,10 @@ function describeFrame(frame: FlowFrame): string {
       return "goal → cloud";
     case "agent_event":
       return `${message.event} · seq ${message.seq}`;
+    case "understanding":
+      return `understood · ${message.payload.domain || "goal"}`;
+    case "understanding_response":
+      return message.payload.confirmed ? "understanding confirmed" : "understanding declined";
     case "present_plan":
       return `plan · ${message.payload.plan.length} items · ${message.payload.proposals.length} proposals`;
     case "proposal":

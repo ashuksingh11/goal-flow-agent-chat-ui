@@ -308,6 +308,9 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
     case "agent_event":
       return reduceAgentEvent(withGoal, message);
 
+    case "understanding":
+      return withGoal;
+
     case "present_plan":
       return {
         ...withGoal,

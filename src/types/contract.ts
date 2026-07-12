@@ -297,6 +297,38 @@ export interface PresentPlan {
 }
 
 // ---------------------------------------------------------------------------
+// understanding (cloud → UI) / understanding_response (UI → cloud)
+// ---------------------------------------------------------------------------
+
+export interface UnderstandingPayload {
+  objective: string;
+  domain: string;
+  /** Display-ready hard-constraint chips, same shape as PresentPlan payload.knew. */
+  knew: PlanKnew;
+  thought: string;
+  time_window?: TimeWindow;
+}
+
+export interface Understanding {
+  type: "understanding";
+  goal_id: string;
+  /** Not minted until dispatch, so absent for this pre-planning gate. */
+  correlation_id?: string;
+  task_status: TaskStatus;
+  payload: UnderstandingPayload;
+}
+
+export interface UnderstandingResponsePayload {
+  confirmed: boolean;
+}
+
+export interface UnderstandingResponse {
+  type: "understanding_response";
+  goal_id: string;
+  payload: UnderstandingResponsePayload;
+}
+
+// ---------------------------------------------------------------------------
 // approval (UI → cloud → device)
 // ---------------------------------------------------------------------------
 
@@ -439,6 +471,8 @@ export type ContractMessage =
   | AgentEvent
   | PlanReady
   | PresentPlan
+  | Understanding
+  | UnderstandingResponse
   | Approval
   | Proposal
   | Status
@@ -449,9 +483,10 @@ export type UiInboundMessage =
   | HelloAck
   | Capabilities
   | AgentEvent
+  | Understanding
   | PresentPlan
   | Proposal
   | Status;
 
 /** Messages the UI can SEND to the cloud. */
-export type UiOutboundMessage = Hello | UserGoal | Approval | Control;
+export type UiOutboundMessage = Hello | UserGoal | UnderstandingResponse | Approval | Control;
