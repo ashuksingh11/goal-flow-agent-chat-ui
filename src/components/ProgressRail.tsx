@@ -11,6 +11,7 @@
  */
 
 import { useRef } from "react";
+import type { CSSProperties } from "react";
 import { RAIL_PHASES } from "../types/ui";
 import type { RailPhase } from "../types/ui";
 
@@ -58,6 +59,7 @@ export function ProgressRail({ phase }: ProgressRailProps) {
             className={`rail-step rail-step--${state} rail-step--${step.agent}${
               entering ? " rail-step--enter" : ""
             }`}
+            style={{ "--i": index } as CSSProperties}
           >
             <span className="rail-marker">
               <span className="rail-dot" aria-hidden="true">

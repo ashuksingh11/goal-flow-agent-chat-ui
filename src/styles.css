@@ -262,6 +262,9 @@ summary:focus-visible {
 /* --------------------------- progress rail ------------------------------- */
 
 .progress-rail {
+  --rail-enter-duration: 800ms;
+  --rail-stagger: 65ms;
+  --rail-connector-fill-duration: 620ms;
   display: flex;
   align-items: center;
   gap: 0;
@@ -311,7 +314,8 @@ summary:focus-visible {
   background: var(--rail-color);
   transform: scaleX(0);
   transform-origin: left;
-  transition: transform var(--dur-slow) var(--ease-out);
+  transition: transform var(--rail-connector-fill-duration) var(--ease-out);
+  transition-delay: calc(var(--i, 0) * var(--rail-stagger));
 }
 .rail-connector--done::after {
   transform: scaleX(1);
@@ -370,7 +374,8 @@ summary:focus-visible {
   transform: scale(1.08);
 }
 .rail-step--enter .rail-marker {
-  animation: rail-step-enter 450ms var(--ease-spring) both;
+  animation: rail-step-enter var(--rail-enter-duration) var(--ease-spring) both;
+  animation-delay: calc(var(--i, 0) * var(--rail-stagger));
 }
 .rail-step--active .rail-label { font-weight: 600; }
 .rail-step--done .rail-dot {
@@ -383,6 +388,10 @@ summary:focus-visible {
   .rail-step--active .rail-dot,
   .rail-step--enter .rail-marker {
     animation: none;
+    animation-delay: 0ms;
+  }
+  .rail-connector::after {
+    transition-delay: 0ms;
   }
 }
 
@@ -712,7 +721,7 @@ summary:focus-visible {
 .plan-item--changed {
   border-color: var(--accent);
   box-shadow: inset 3px 0 0 0 var(--accent);
-  animation: card-pulse 800ms var(--ease-out) 0ms 2 both;
+  animation: card-pulse 1150ms var(--ease-out) 0ms 2 both;
 }
 .plan-item__updated-badge {
   flex: none;
@@ -748,7 +757,7 @@ summary:focus-visible {
   font-size: 0.85em;
   line-height: 1.25;
   text-decoration: none;
-  animation: old-collapse 300ms var(--ease-out) 650ms both;
+  animation: old-collapse 350ms var(--ease-out) 1600ms both;
 }
 .plan-item__old::after {
   content: "";
@@ -760,11 +769,11 @@ summary:focus-visible {
   background: var(--danger);
   transform: scaleX(0);
   transform-origin: left;
-  animation: strike-draw 350ms var(--ease-out) both;
+  animation: strike-draw 450ms var(--ease-out) both;
 }
 .plan-item__title--in,
 .plan-item__detail--in {
-  animation: morph-in 450ms var(--ease-out) 500ms both;
+  animation: morph-in 520ms var(--ease-out) 1600ms both;
 }
 .plan-item__title--in {
   display: inline-block;
@@ -778,6 +787,18 @@ summary:focus-visible {
 .plan-item__detail--in {
   display: block;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .plan-item--morph,
+  .plan-item--changed,
+  .plan-item__old,
+  .plan-item__old::after,
+  .plan-item__title--in,
+  .plan-item__detail--in {
+    animation-delay: 0ms;
+  }
+}
+
 .plan-item__footer {
   display: flex;
   align-items: center;
