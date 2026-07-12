@@ -22,7 +22,6 @@
 
 import { useEffect, useReducer, useRef, useState } from "react";
 import { AdaptationCard } from "./components/AdaptationCard";
-import { AgentHandoff } from "./components/AgentHandoff";
 import { AgentStream } from "./components/AgentStream";
 import { DemoControls } from "./components/DemoControls";
 import { EventStrip } from "./components/EventStrip";
@@ -77,8 +76,6 @@ interface UiState {
   phase: RailPhase | null;
   /** True while the device streams work (drives caret/chips/skeletons). */
   working: boolean;
-  /** Bumped when existing UI actions dispatch work from cloud to device. */
-  handoffSeq: number;
   /** Pre-planning confirmation gate from the cloud. */
   understanding: Understanding | null;
   /** Locally declined goal; late frames for it are ignored. */
@@ -123,7 +120,6 @@ const INITIAL_STATE: UiState = {
   activeGoalId: null,
   phase: null,
   working: false,
-  handoffSeq: 0,
   understanding: null,
   declinedGoalId: null,
   modules: null,
@@ -447,7 +443,6 @@ function reducer(state: UiState, action: UiAction): UiState {
         understanding: null,
         phase: "interpreting",
         working: true,
-        handoffSeq: state.handoffSeq + 1,
         agentEntries: [],
         draftItems: [],
         plan: null,
@@ -474,7 +469,6 @@ function reducer(state: UiState, action: UiAction): UiState {
           activeGoalId: action.goalId,
           phase: maxRailPhase(state.phase, "planning"),
           working: true,
-          handoffSeq: state.handoffSeq + 1,
         };
       }
       return {
@@ -527,7 +521,6 @@ function reducer(state: UiState, action: UiAction): UiState {
       }
       return {
         ...state,
-        handoffSeq: state.handoffSeq + 1,
         firingEventId: action.eventId,
         eventChips: state.eventChips.map((chip) =>
           chip.event.id === action.eventId ? { ...chip, state: "firing" } : chip,
@@ -561,7 +554,6 @@ function reducer(state: UiState, action: UiAction): UiState {
         ticks: [],
         demoClock: INITIAL_DEMO_CLOCK,
         working: false,
-        handoffSeq: 0,
         phase: state.pristinePlan ? "awaiting_approval" : state.phase,
       };
   }
@@ -656,7 +648,6 @@ export default function App() {
 
   const planPending = state.working && !state.plan;
   const hasEventStrip = (state.plan?.payload.demo_events?.length ?? 0) > 0;
-  const showHandoff = Boolean(state.plan || state.working || state.activeGoalId);
   const latestNote = [...state.transcript].reverse().find((entry) => entry.kind === "note");
 
   return (
@@ -683,10 +674,6 @@ export default function App() {
       </header>
 
       <ProgressRail phase={state.phase} />
-
-      {showHandoff ? (
-        <AgentHandoff seq={state.handoffSeq} active={state.working} />
-      ) : null}
 
       <main className={presenterMode ? "stage stage--with-feed" : "stage"}>
         <section className="stage__main">

@@ -25,7 +25,11 @@
   --accent: #5b8cff;
   --accent-soft: rgba(91, 140, 255, 0.16);
   --accent-glow: rgba(91, 140, 255, 0.38);
+  --accent-glow-clear: rgba(91, 140, 255, 0);
   --good: #3ddc97;
+  --good-soft: rgba(61, 220, 151, 0.16);
+  --good-glow: rgba(61, 220, 151, 0.34);
+  --good-glow-clear: rgba(61, 220, 151, 0);
   --warn: #ffb454;
   --danger: #ff6b6b;
 
@@ -120,8 +124,26 @@ summary:focus-visible {
 
 /* progress-rail active dot pulse */
 @keyframes rail-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
-  50%      { box-shadow: 0 0 0 8px rgba(91, 140, 255, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 var(--rail-glow, var(--accent-glow)); }
+  50%      { box-shadow: 0 0 0 8px var(--rail-glow-clear, var(--accent-glow-clear)); }
+}
+
+@keyframes rail-reveal {
+  0% {
+    opacity: 0;
+    transform: translateY(5px) scale(0.9);
+    filter: drop-shadow(0 0 0 var(--rail-glow, var(--accent-glow)));
+  }
+  55% {
+    opacity: 1;
+    transform: translateY(0) scale(1.08);
+    filter: drop-shadow(0 0 12px var(--rail-glow, var(--accent-glow)));
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: drop-shadow(0 0 0 var(--rail-glow, var(--accent-glow)));
+  }
 }
 
 /* hero / adaptation card entrance */
@@ -184,28 +206,6 @@ summary:focus-visible {
   }
 }
 
-@keyframes handoff-travel {
-  0% {
-    opacity: 0;
-    transform: translateX(0) translateY(-50%) scale(0.86);
-  }
-  12% {
-    opacity: 1;
-  }
-  78% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-    transform: translateX(var(--handoff-track)) translateY(-50%) scale(1);
-  }
-}
-
-@keyframes handoff-fade {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 1ms !important;
@@ -261,7 +261,22 @@ summary:focus-visible {
   transition: opacity var(--dur) var(--ease-out);
 }
 .progress-rail--idle { opacity: 0.45; }
-.rail-step { display: flex; align-items: center; flex: 1; min-width: 0; }
+.rail-step {
+  --rail-color: var(--accent);
+  --rail-soft: var(--accent-soft);
+  --rail-glow: var(--accent-glow);
+  --rail-glow-clear: var(--accent-glow-clear);
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+.rail-step--device {
+  --rail-color: var(--good);
+  --rail-soft: var(--good-soft);
+  --rail-glow: var(--good-glow);
+  --rail-glow-clear: var(--good-glow-clear);
+}
 .rail-connector {
   flex: 1;
   height: 2px;
@@ -270,12 +285,18 @@ summary:focus-visible {
   position: relative;
   overflow: hidden;
   border-radius: 999px;
+  opacity: 1;
+  transform: translateY(0) scaleX(1);
+  transform-origin: left;
+  transition:
+    opacity var(--dur) var(--ease-out),
+    transform var(--dur) var(--ease-out);
 }
 .rail-connector::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, var(--good), var(--accent));
+  background: var(--rail-color);
   transform: scaleX(0);
   transform-origin: left;
   transition: transform var(--dur-slow) var(--ease-out);
@@ -283,10 +304,22 @@ summary:focus-visible {
 .rail-connector--done::after {
   transform: scaleX(1);
 }
+.rail-marker {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transition:
+    opacity var(--dur) var(--ease-out),
+    transform var(--dur) var(--ease-out),
+    filter var(--dur) var(--ease-out);
+}
 .rail-dot {
   width: 18px; height: 18px;
   border-radius: 50%;
-  background: var(--stroke);
+  background: var(--rail-soft);
+  border: 1px solid color-mix(in srgb, var(--rail-color) 46%, transparent);
   flex: none;
   display: grid;
   place-items: center;
@@ -295,164 +328,50 @@ summary:focus-visible {
   font-weight: 800;
   transition:
     background var(--dur) var(--ease-out),
+    border-color var(--dur) var(--ease-out),
+    box-shadow var(--dur) var(--ease-out),
     transform var(--dur) var(--ease-out);
 }
-.rail-label { margin-left: 0.45rem; font-size: 0.78rem; color: var(--ink-faint); white-space: nowrap; }
+.rail-label {
+  margin-left: 0.45rem;
+  font-size: 0.78rem;
+  color: var(--rail-color);
+  white-space: nowrap;
+  transition: color var(--dur) var(--ease-out);
+}
+
+.rail-step--todo .rail-connector,
+.rail-step--todo .rail-marker {
+  opacity: 0;
+  transform: translateY(5px) scale(0.94);
+}
 
 .rail-step--active .rail-dot {
-  background: var(--accent);
+  background: var(--rail-color);
+  border-color: transparent;
   animation: rail-pulse 1.6s var(--ease-out) infinite;
   transform: scale(1.08);
 }
-.rail-step--active .rail-label { color: var(--ink); font-weight: 600; }
-.rail-step--done .rail-dot { background: var(--good); }
-.rail-step--done .rail-label { color: var(--ink-dim); }
-
-/* ------------------------- agent handoff strip --------------------------- */
-
-.agent-handoff {
-  --handoff-track: clamp(96px, 16vw, 180px);
-  align-self: center;
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  margin-top: -0.9rem;
-  color: var(--ink-dim);
-  font-size: 0.76rem;
+.rail-step--active .rail-marker,
+.rail-step--active .rail-connector,
+.rail-step--done .rail-marker,
+.rail-step--done .rail-connector {
+  animation: rail-reveal var(--dur-slow) var(--ease-spring) both;
 }
-.agent-handoff__node {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.36rem;
-  position: relative;
-  min-width: 108px;
-  white-space: nowrap;
-  transition:
-    color var(--dur) var(--ease-out),
-    text-shadow var(--dur) var(--ease-out);
+.rail-step--active .rail-label { font-weight: 600; }
+.rail-step--done .rail-dot {
+  background: var(--rail-color);
+  border-color: transparent;
 }
-.agent-handoff__node--cloud {
-  justify-content: flex-end;
-}
-.agent-handoff__node--device {
-  justify-content: flex-start;
-}
-.agent-handoff__glyph {
-  display: inline-grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  border: 1px solid var(--stroke);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.035);
-  color: var(--ink-faint);
-  font-size: 0.76rem;
-  line-height: 1;
-  transition:
-    border-color var(--dur) var(--ease-out),
-    background var(--dur) var(--ease-out),
-    box-shadow var(--dur) var(--ease-out),
-    color var(--dur) var(--ease-out);
-}
-.agent-handoff__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.agent-handoff__node--arrived,
-.agent-handoff__node--active {
-  color: var(--ink);
-  text-shadow: 0 0 16px var(--accent-glow);
-}
-.agent-handoff__node--arrived .agent-handoff__glyph,
-.agent-handoff__node--active .agent-handoff__glyph {
-  border-color: rgba(91, 140, 255, 0.58);
-  background: var(--accent-soft);
-  color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(91, 140, 255, 0.08);
-}
-.agent-handoff__node--active .agent-handoff__glyph {
-  animation: rail-pulse 1.6s var(--ease-out) infinite;
-}
-.agent-handoff__track {
-  position: relative;
-  width: calc(var(--handoff-track) + 10px);
-  height: 20px;
-  margin: 0 0.45rem;
-}
-.agent-handoff__track::before {
-  content: "";
-  position: absolute;
-  left: 5px;
-  right: 5px;
-  top: 50%;
-  height: 1.5px;
-  border-radius: 999px;
-  background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0), var(--stroke), rgba(255, 255, 255, 0)),
-    var(--stroke);
-}
-.agent-handoff__track::after {
-  content: "";
-  position: absolute;
-  right: 1px;
-  top: 50%;
-  width: 5px;
-  height: 5px;
-  border-right: 1.5px solid var(--ink-faint);
-  border-top: 1.5px solid var(--ink-faint);
-  transform: translateY(-50%) rotate(45deg);
-  opacity: 0.75;
-}
-.agent-handoff__caption {
-  position: absolute;
-  left: 50%;
-  top: -0.4rem;
-  transform: translateX(-50%);
-  color: var(--accent);
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  opacity: 0.75;
-  pointer-events: none;
-}
-.agent-handoff__comet {
-  position: absolute;
-  left: 0;
-  top: 50%;
-  width: 28px;
-  height: 6px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, rgba(91, 140, 255, 0), var(--accent));
-  filter: drop-shadow(0 0 8px var(--accent-glow));
-  animation: handoff-travel 900ms var(--ease-out) both;
-}
-.agent-handoff__comet::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  top: 50%;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  transform: translateY(-50%);
-  box-shadow: 0 0 12px var(--accent-glow);
-}
+.rail-step--done .rail-label { color: color-mix(in srgb, var(--rail-color) 72%, var(--ink-dim)); }
 
 @media (prefers-reduced-motion: reduce) {
-  .agent-handoff__node--active .agent-handoff__glyph {
+  .rail-step--active .rail-dot,
+  .rail-step--active .rail-marker,
+  .rail-step--active .rail-connector,
+  .rail-step--done .rail-marker,
+  .rail-step--done .rail-connector {
     animation: none;
-  }
-  .agent-handoff__comet {
-    left: 50%;
-    width: 6px;
-    background: var(--accent);
-    transform: translate(-50%, -50%);
-    animation: handoff-fade 1ms linear both;
-  }
-  .agent-handoff__comet::after {
-    display: none;
   }
 }
 

@@ -28,14 +28,16 @@ export type RailPhase =
   | "awaiting_approval"
   | "monitoring";
 
-export const RAIL_PHASES: readonly { id: RailPhase; label: string }[] = [
-  { id: "interpreting", label: "Interpreting" },
-  { id: "grounding", label: "Grounding" },
-  { id: "confirming", label: "Confirm" },
-  { id: "planning", label: "Planning" },
-  { id: "checking", label: "Checking" },
-  { id: "awaiting_approval", label: "Approval" },
-  { id: "monitoring", label: "Monitoring" },
+export type RailAgent = "cloud" | "device";
+
+export const RAIL_PHASES: readonly { id: RailPhase; label: string; agent: RailAgent }[] = [
+  { id: "interpreting", label: "Interpreting", agent: "cloud" },
+  { id: "grounding", label: "Grounding", agent: "cloud" },
+  { id: "confirming", label: "Confirm", agent: "cloud" },
+  { id: "planning", label: "Planning", agent: "device" },
+  { id: "checking", label: "Checking", agent: "device" },
+  { id: "awaiting_approval", label: "Approval", agent: "device" },
+  { id: "monitoring", label: "Monitoring", agent: "device" },
 ] as const;
 
 /** Map any task_status onto the rail (executing/adapting fold into monitoring). */

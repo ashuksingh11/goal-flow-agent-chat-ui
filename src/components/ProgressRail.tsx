@@ -1,11 +1,12 @@
 /**
  * ProgressRail — the horizontal phase rail: Interpreting → Grounding →
- * Planning → Checking → Approval → Monitoring.
+ * Confirm → Planning → Checking → Approval → Monitoring.
  *
  * Driven by `agent_event {event:"phase"}` frames plus task_status on
  * present_plan/status (see railPhaseFromStatus). The current phase pulses
  * (`rail-pulse` keyframe); completed phases render a check; the connector
- * fills left-to-right as phases complete.
+ * fills left-to-right as phases complete. Future phases keep their slot but
+ * render transparent until the monotonic phase reaches them.
  *
  */
 
@@ -42,7 +43,10 @@ export function ProgressRail({ phase }: ProgressRailProps) {
         const state = stepState(step.id, phase);
         const connectorDone = index > 0 && index <= currentOrder;
         return (
-          <div key={step.id} className={`rail-step rail-step--${state}`}>
+          <div
+            key={step.id}
+            className={`rail-step rail-step--${state} rail-step--${step.agent}`}
+          >
             {index > 0 ? (
               <span
                 className={
@@ -53,10 +57,12 @@ export function ProgressRail({ phase }: ProgressRailProps) {
                 aria-hidden="true"
               />
             ) : null}
-            <span className="rail-dot" aria-hidden="true">
-              {state === "done" ? "✓" : null}
+            <span className="rail-marker">
+              <span className="rail-dot" aria-hidden="true">
+                {state === "done" ? "✓" : null}
+              </span>
+              <span className="rail-label">{step.label}</span>
             </span>
-            <span className="rail-label">{step.label}</span>
           </div>
         );
       })}
