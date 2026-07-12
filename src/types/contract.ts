@@ -280,7 +280,7 @@ export interface PlanReady {
  * The personalization line — what the agent already knew and used.
  * Free-form key → value(s); the UI renders it as the "Knew:" line.
  */
-export type PlanKnew = Record<string, string | string[]>;
+export type PlanKnew = Record<string, unknown>;
 
 export interface PresentPlanPayload extends PlanPayload {
   /** Added by the cloud when relaying: the "what it knew" personalization. */

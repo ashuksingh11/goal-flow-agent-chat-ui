@@ -55,7 +55,7 @@ function formatWhen(when?: string): string | null {
   }).format(date);
 }
 
-function knewValue(value: unknown): string {
+export function knewValue(value: unknown): string {
   // Defensive: only render primitives / string lists — never a raw object
   // (that would crash React). Objects/empties collapse to "".
   if (Array.isArray(value)) return value.slice(0, 3).map(String).join(", ");

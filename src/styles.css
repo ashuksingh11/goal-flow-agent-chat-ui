@@ -615,6 +615,82 @@ summary:focus-visible {
   animation: card-enter var(--dur) var(--ease-out) both;
 }
 
+/* ------------------------- understanding gate --------------------------- */
+
+.transcript-note {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 0.88rem;
+}
+
+.understanding-card {
+  padding: 1.2rem 1.35rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.032)),
+    var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-card);
+  animation: card-enter var(--dur-slow) var(--ease-out) both;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.understanding-card__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.understanding-card h2 {
+  margin: 0;
+  max-width: 24ch;
+  color: var(--ink);
+  font-size: clamp(1.35rem, 3vw, 2.1rem);
+  line-height: 1.08;
+  letter-spacing: 0;
+}
+
+.understanding-card__knew {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.understanding-card__thought {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 0.95rem;
+  font-style: italic;
+  line-height: 1.55;
+}
+
+.understanding-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 0.1rem;
+}
+
+.understanding-card__resolved {
+  margin: 0;
+  color: var(--good);
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+
+.understanding-card--confirmed {
+  border-color: rgba(61, 220, 151, 0.34);
+  background: rgba(61, 220, 151, 0.055);
+}
+
+.understanding-card--declined {
+  opacity: 0.72;
+}
+
 /* ----------------------------- plan hero --------------------------------- */
 
 .plan-card {

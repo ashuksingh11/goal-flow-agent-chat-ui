@@ -18,10 +18,11 @@ import type {
 // Progress rail
 // ---------------------------------------------------------------------------
 
-/** The six steps the rail renders, in order. */
+/** The seven steps the rail renders, in order. */
 export type RailPhase =
   | "interpreting"
   | "grounding"
+  | "confirming"
   | "planning"
   | "checking"
   | "awaiting_approval"
@@ -30,6 +31,7 @@ export type RailPhase =
 export const RAIL_PHASES: readonly { id: RailPhase; label: string }[] = [
   { id: "interpreting", label: "Interpreting" },
   { id: "grounding", label: "Grounding" },
+  { id: "confirming", label: "Confirm" },
   { id: "planning", label: "Planning" },
   { id: "checking", label: "Checking" },
   { id: "awaiting_approval", label: "Approval" },

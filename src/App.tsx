@@ -32,6 +32,7 @@ import { PresenterFeed } from "./components/PresenterFeed";
 import { ProgressRail } from "./components/ProgressRail";
 import { Skeleton } from "./components/Skeleton";
 import { StatusTimeline } from "./components/StatusTimeline";
+import { UnderstandingCard } from "./components/UnderstandingCard";
 import { createGoalFlowSocket } from "./lib/ws";
 import type { ConnectionState, GoalFlowSocket } from "./lib/ws";
 import type {
@@ -44,6 +45,7 @@ import type {
   PresentPlan,
   Proposal,
   Status,
+  Understanding,
   UiInboundMessage,
   UiOutboundMessage,
 } from "./types/contract";
@@ -77,6 +79,10 @@ interface UiState {
   working: boolean;
   /** Bumped when existing UI actions dispatch work from cloud to device. */
   handoffSeq: number;
+  /** Pre-planning confirmation gate from the cloud. */
+  understanding: Understanding | null;
+  /** Locally declined goal; late frames for it are ignored. */
+  declinedGoalId: string | null;
   /** Device module registry (capabilities frame) — chips legend / debug. */
   modules: CapabilityModule[] | null;
   /** Reduced agent_event stream: thinking entries + tool chips. */
@@ -118,6 +124,8 @@ const INITIAL_STATE: UiState = {
   phase: null,
   working: false,
   handoffSeq: 0,
+  understanding: null,
+  declinedGoalId: null,
   modules: null,
   agentEntries: [],
   draftItems: [],
@@ -145,6 +153,7 @@ type UiAction =
   | { type: "recv"; message: UiInboundMessage }
   | { type: "sent"; message: UiOutboundMessage }
   | { type: "goal_submitted"; text: string }
+  | { type: "understanding_sent"; goalId: string; confirmed: boolean }
   | { type: "decisions_sent"; decisions: ApprovalDecision[] }
   | { type: "event_fired"; eventId: string }
   | { type: "event_timeout"; eventId: string }
@@ -293,6 +302,10 @@ function isPlanApproved(plan: PresentPlan | null, statuses: ProposalStatusMap): 
 
 /** The single inbound-frame → UI-state mapping (see ARCHITECTURE.md table). */
 function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
+  if ("goal_id" in message && message.goal_id === state.declinedGoalId) {
+    return state;
+  }
+
   const withGoal =
     "goal_id" in message && message.goal_id !== state.activeGoalId
       ? { ...state, activeGoalId: message.goal_id }
@@ -309,11 +322,17 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
       return reduceAgentEvent(withGoal, message);
 
     case "understanding":
-      return withGoal;
+      return {
+        ...withGoal,
+        understanding: message,
+        working: false,
+        phase: maxRailPhase(withGoal.phase, "confirming"),
+      };
 
     case "present_plan":
       return {
         ...withGoal,
+        understanding: null,
         plan: message,
         pristinePlan: message,
         working: false,
@@ -326,7 +345,10 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         firedEventIds: [],
         firingEventId: null,
         approved: isPlanApproved(message, {}),
-        phase: railPhaseFromStatus(message.task_status) ?? "awaiting_approval",
+        phase: maxRailPhase(
+          withGoal.phase,
+          railPhaseFromStatus(message.task_status) ?? "awaiting_approval",
+        ),
       };
 
     case "proposal": {
@@ -334,7 +356,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         ...withGoal,
         working: false,
         adaptations: [...withGoal.adaptations, message],
-        phase: railPhaseFromStatus(message.task_status) ?? withGoal.phase,
+        phase: maxRailPhase(withGoal.phase, railPhaseFromStatus(message.task_status)),
       };
       const eventId = inboundEventId(message);
       return eventId ? markEventFired(next, eventId) : next;
@@ -347,7 +369,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         // THE DAY-UPDATE FIX: merge (never replace) the sim clock — frames
         // without day/sim_date can no longer reset the label (v1 bug).
         demoClock: mergeDemoClock(withGoal.demoClock, message.payload),
-        phase: railPhaseFromStatus(message.task_status) ?? withGoal.phase,
+        phase: maxRailPhase(withGoal.phase, railPhaseFromStatus(message.task_status)),
       };
       // A daily adaptation was approved → replace the plan in place with the
       // patched plan, merge its impact badges, and mark the changed rows so the
@@ -421,9 +443,52 @@ function reducer(state: UiState, action: UiAction): UiState {
           ...state.transcript,
           { kind: "goal", id: state.nextId, text: action.text },
         ],
+        activeGoalId: null,
+        understanding: null,
         phase: "interpreting",
         working: true,
         handoffSeq: state.handoffSeq + 1,
+        agentEntries: [],
+        draftItems: [],
+        plan: null,
+        pristinePlan: null,
+        changedPlanIds: [],
+        planMorphs: {},
+        morphSeq: 0,
+        changedImpactLabels: [],
+        proposalStatuses: {},
+        adaptations: [],
+        eventChips: [],
+        firedEventIds: [],
+        firingEventId: null,
+        approved: false,
+        ticks: [],
+        lastSeq: 0,
+      };
+
+    case "understanding_sent":
+      if (action.confirmed) {
+        return {
+          ...state,
+          understanding: null,
+          activeGoalId: action.goalId,
+          phase: maxRailPhase(state.phase, "planning"),
+          working: true,
+          handoffSeq: state.handoffSeq + 1,
+        };
+      }
+      return {
+        ...state,
+        nextId: state.nextId + 1,
+        transcript: [
+          ...state.transcript,
+          { kind: "note", id: state.nextId, text: "Cancelled — try rephrasing" },
+        ],
+        activeGoalId: null,
+        understanding: null,
+        declinedGoalId: action.goalId,
+        phase: null,
+        working: false,
         agentEntries: [],
         draftItems: [],
         plan: null,
@@ -547,6 +612,17 @@ export default function App() {
     });
   };
 
+  const sendUnderstanding = (confirmed: boolean) => {
+    if (!state.understanding) return;
+    const goalId = state.understanding.goal_id;
+    dispatch({ type: "understanding_sent", goalId, confirmed });
+    socketRef.current?.send({
+      type: "understanding_response",
+      goal_id: goalId,
+      payload: { confirmed },
+    });
+  };
+
   const sendControl = (command: ControlCommand, payload?: ControlPayload) => {
     if (!state.activeGoalId) return;
     socketRef.current?.send({
@@ -581,6 +657,7 @@ export default function App() {
   const planPending = state.working && !state.plan;
   const hasEventStrip = (state.plan?.payload.demo_events?.length ?? 0) > 0;
   const showHandoff = Boolean(state.plan || state.working || state.activeGoalId);
+  const latestNote = [...state.transcript].reverse().find((entry) => entry.kind === "note");
 
   return (
     <div className="app">
@@ -615,9 +692,23 @@ export default function App() {
         <section className="stage__main">
           <GoalComposer onSubmit={submitGoal} disabled={connection !== "open"} />
 
+          {latestNote && !state.activeGoalId && !state.working && !state.plan ? (
+            <p className="transcript-note">{latestNote.text}</p>
+          ) : null}
+
+          {state.understanding ? (
+            <UnderstandingCard
+              objective={state.understanding.payload.objective}
+              constraints={state.understanding.payload.knew}
+              thought={state.understanding.payload.thought}
+              onConfirm={() => sendUnderstanding(true)}
+              onDecline={() => sendUnderstanding(false)}
+            />
+          ) : null}
+
           {/* The live "watch it think" stream is for the WORKING phase; once the
               plan is the hero it collapses (raw trail stays in presenter mode). */}
-          {!state.plan && (state.agentEntries.length > 0 || state.working) ? (
+          {!state.understanding && !state.plan && (state.agentEntries.length > 0 || state.working) ? (
             <AgentStream entries={state.agentEntries} active={state.working} />
           ) : null}
 
