@@ -30,16 +30,18 @@ src/
 
 ```
 App                        — socket + streaming state machine (one pure reducer) + stage
-├── ProgressRail           — Interpreting → Grounding → Planning → Checking → Approval → Monitoring
+├── ProgressRail           — Interpreting → Grounding → Confirm → Planning → Checking → Approval → Monitoring
 ├── stage
 │   ├── GoalComposer       — input row (inline in App.tsx) + MicButton (STT stub)
+│   ├── UnderstandingCard  — confirm-understanding gate: objective/constraints/thought; Confirm & plan / Decline
 │   ├── AgentStream        — live thinking ticker + tool-call chips
 │   ├── Skeleton           — shimmering plan silhouette while planning
 │   ├── PlanCard           — the generic plan hero
 │   │   └── ProposalList   — tiered approvals (auto / light / firm)
 │   ├── AdaptationCard     — the loud "caught a change" card
 │   └── StatusTimeline     — quiet sustain ticks while monitoring
-├── DemoControls           — sim clock: derived day/date, week strip, Advance/Reset/Set date
+├── EventStrip             — presenter-fired demo event chips (idle→firing→fired), when the plan has demo_events
+├── DemoControls           — sim clock: derived day/date, week strip, Advance/Reset/Set date (fallback, no demo_events)
 └── PresenterFeed          — raw WS frame feed ("Show agent flow" toggle)
 ```
 
@@ -51,16 +53,18 @@ in `ErrorBoundary` so one bad frame never blanks the app.
 `createGoalFlowSocket()` opens ONE WebSocket to `VITE_WS_URL` (default
 `ws://localhost:8000/ws`), sends `hello {role:"ui"}` on open, and reconnects after 1.5 s on
 drop (re-sending `hello`). Inbound frames are JSON-parsed and validated against the set of
-UI-inbound `type`s (`hello_ack`, `capabilities`, `agent_event`, `present_plan`, `proposal`,
-`status`) — unknown frames are warned and dropped, never rendered. `onMessage` / `onSent` /
-`onStateChange` feed the App reducer, the presenter feed, and the header connection dot.
+UI-inbound `type`s (`hello_ack`, `capabilities`, `agent_event`, `understanding`, `present_plan`,
+`proposal`, `status`) — unknown frames are warned and dropped, never rendered. `onMessage` /
+`onSent` / `onStateChange` feed the App reducer, the presenter feed, and the header connection
+dot.
 
 ## The streaming state machine (`App.tsx`)
 
 All inbound frames pass through **one pure reducer**, `reduceInbound` — the entire
 event→UI-state mapping lives there and nowhere else, so it's testable and the components
-stay dumb. `UiState` holds: `phase` (rail), `working`, `agentEntries` (thinking + chips),
-`draftItems`, `plan`, `proposalStatuses`, `adaptations`, `ticks`, `demoClock`, `frames`
+stay dumb. `UiState` holds: `phase` (rail), `working`, `understanding`, `agentEntries` (thinking
++ chips), `draftItems`, `plan`, `proposalStatuses`, `adaptations`, `ticks`, `demoClock`,
+`eventChips` / `firedEventIds` / `firingEventId`, `planMorphs` / `morphSeq`, `frames`
 (presenter feed, capped at 120), and `lastSeq`.
 
 | Inbound frame | Reducer effect | What the user sees |
@@ -72,9 +76,15 @@ stay dumb. `UiState` holds: `phase` (rail), `working`, `agentEntries` (thinking 
 | `agent_event · tool_call` | push chip `{module, fn, state:"running"}` | chip pops in (`chip-pop`) |
 | `agent_event · tool_result` | resolve the most recent *running* chip matching `module.function` | chip flips to ✓ + one-line summary |
 | `agent_event · plan_progress` | push a `DraftPlanItem` | one skeleton row is replaced by a real draft row |
-| `present_plan` | `plan` set, `working` off, drafts cleared, phase → `awaiting_approval` (via `task_status`) | **the hero animates in** (`card-enter`) over the dissolving skeleton |
-| `proposal` (adapting) | append to `adaptations`, phase from `task_status` | the AdaptationCard slides in with a glow |
-| `status` | tick appended (cap 40); **clock MERGED** (see below); `executed[]` flips proposals to `done`; phase from `task_status` | quiet timeline dot; approvals confirm; sim day advances |
+| `understanding` | `understanding` set, `working` off, phase → `confirming` | `UnderstandingCard` renders objective/constraints/thought and blocks on Confirm & plan / Decline |
+| `present_plan` | `plan` set, `understanding` cleared, `working` off, drafts cleared, `eventChips` built from `payload.demo_events`, phase → `awaiting_approval` (via `task_status`) | **the hero animates in** (`card-enter`) over the dissolving skeleton; `EventStrip` appears once the plan is approved if `demo_events` is non-empty |
+| `proposal` (adapting) | append to `adaptations`, phase from `task_status`; `event_id` (payload or top-level) flips the matching event chip to `fired` | the AdaptationCard slides in with a glow |
+| `status` | tick appended (cap 40); **clock MERGED** (see below); `executed[]` flips proposals to `done`; `updated_plan` + `changed_ids` replace the plan in place and seed `planMorphs` (old title/detail) so `PlanCard` morphs the changed day-row (strike-through → slide in); `event_id` flips the matching event chip to `fired`; phase from `task_status` | quiet timeline dot; approvals confirm; sim day advances; a fired event's adaptation lands as a morphing row |
+
+Outbound `understanding_response {goal_id, payload:{confirmed}}` answers `sendUnderstanding()`.
+Outbound `control {command:"trigger_event", event_id}` (via `fireEvent()`) fires an event chip —
+gated on `state.approved` and a 30 s firing timeout (`event_timeout` action) in case the
+round-trip never lands.
 
 Ordering/dedupe: `agent_event.seq` is monotonic per goal — `reduceAgentEvent` drops
 `seq <= lastSeq` (late/duplicate frames after a reconnect). Consecutive `thinking` fragments
@@ -86,15 +96,45 @@ lights "Interpreting" until the device's own phase events take over. Sending dec
 (`decisions_sent`) marks those proposals `pending` optimistically — they flip to `done` only
 when a later `status.payload.executed[]` entry confirms them.
 
-Stage layout logic (in `App`'s render): `AgentStream` shows while there's no plan and the
-agent is working; `planPending = working && !plan` shows draft rows + `Skeleton` (count
-shrinks as drafts arrive: `max(1, 4 - drafts)`); `PlanCard` replaces both once `present_plan`
-lands; `DemoControls` appears once a goal is active.
+Stage layout logic (in `App`'s render): `UnderstandingCard` shows whenever `state.understanding`
+is set, ahead of everything else, and blocks the goal composer; `AgentStream` shows while there's
+no understanding gate or plan and the agent is working; `planPending = working && !plan` shows
+draft rows + `Skeleton` (count shrinks as drafts arrive: `max(1, 4 - drafts)`); `PlanCard`
+replaces both once `present_plan` lands. Below the stage: `EventStrip` renders when the plan
+carries `demo_events` (`hasEventStrip`), otherwise `DemoControls` renders once a plan exists
+(`hasDemoControls`) — the two are mutually exclusive per plan.
+
+## The confirm-understanding gate (`UnderstandingCard`)
+
+Renders `Understanding.payload`: `objective` as the heading, `knew` constraints as chips (via
+`PlanCard`'s shared `knewValue()`), and `thought` as a line of agent reasoning. Two buttons —
+**Confirm & plan** (`button--firm`) and **Decline** (`button--ghost`) — call `onConfirm`/
+`onDecline`, which `App` wires to `sendUnderstanding(confirmed)`: dispatches the
+`understanding_sent` action (clears `state.understanding`; on decline also records
+`declinedGoalId` so any late frames for that goal are dropped) and sends
+`understanding_response {goal_id, payload:{confirmed}}`. No `resolved` prop is passed in the
+live flow, so the card always shows its action buttons while mounted; the `resolved` states
+("Confirmed. Planning next." / "Declined.") exist for a brief resolved rendering if reintroduced.
+
+## The event-driven meal week (`EventStrip`)
+
+When `present_plan.payload.demo_events` is non-empty (`DemoEvent {id, label, day, title, kind,
+order}`), `EventStrip` replaces `DemoControls` for that plan. Chips are day-labelled ("Day N"
+from `event.day`, never a calendar date) and sorted by `order`; each is `idle` (locked until
+`state.approved`), `firing` (clicked, awaiting a round-trip, spinner, everything else disabled),
+or `fired` (✓, permanently disabled). `onFire(eventId)` → `App.fireEvent` dispatches
+`event_fired` (chip → `firing`) and sends `control {command:"trigger_event", payload:{event_id}}`;
+a 30 s timer (`event_timeout`) unsticks a chip whose round-trip never lands. The device's
+resulting `proposal`/`status` echoes `event_id` (top-level or `payload.event_id`) — the reducer's
+`markEventFired` matches it back to the chip and flips it to `fired`. Approving that adaptation's
+proposal is what delivers the `status.updated_plan` / `changed_ids` that morph the plan card (see
+above). "Reset week" sends `control {command:"reset"}` and clears the strip client-side.
 
 ## The rail (`ProgressRail` + `types/ui.ts`)
 
-Six steps in `RAIL_PHASES`. Driven by `agent_event:phase` while working and by
-`railPhaseFromStatus(task_status)` on `present_plan`/`proposal`/`status` —
+Seven steps in `RAIL_PHASES` (Interpreting, Grounding, **Confirm**, Planning, Checking, Approval,
+Monitoring). Driven by `agent_event:phase` while working, by the `understanding` frame (→
+`confirming`), and by `railPhaseFromStatus(task_status)` on `present_plan`/`proposal`/`status` —
 `executing`/`monitoring`/`adapting`/`done` all fold into **Monitoring**. Per-step states:
 `done` (check), `active` (`rail-pulse`, connector filling), `todo` (dim). `phase === null`
 (before the first goal) renders the rail idle/dimmed.
@@ -137,7 +177,8 @@ tier-weighted buttons → the same pending/confirmed states via `proposalStatuse
 
 ## The generic sim clock (`DemoControls` + `DemoClock` in `types/ui.ts`)
 
-Three rules, enforced in code (this fixes the v1 bug where any status frame lacking
+The fallback control for plans with no `demo_events` (see `EventStrip` above, which takes over
+for the event-driven meal week). Three rules, enforced in code (this fixes the v1 bug where any status frame lacking
 `day`/`sim_date` snapped the label back to a hardcoded "Mon"):
 
 1. **Merge, never replace** — `mergeDemoClock` updates only the fields a status carries.

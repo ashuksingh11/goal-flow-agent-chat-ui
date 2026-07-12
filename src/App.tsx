@@ -17,7 +17,9 @@
  * All inbound frames flow through ONE pure reducer (reduceInbound) — the
  * streaming-event → UI-state mapping lives there and nowhere else.
  *
- * SKELETON — state machine + composition are final; visual polish is TODO.
+ * Fully implemented: state machine, composition, and visuals, including the
+ * confirm-understanding gate (UnderstandingCard) and the event-driven meal
+ * week (EventStrip).
  */
 
 import { useEffect, useReducer, useRef, useState } from "react";
