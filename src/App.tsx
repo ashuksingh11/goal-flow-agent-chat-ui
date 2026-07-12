@@ -86,6 +86,12 @@ interface UiState {
   pristinePlan: PresentPlan | null;
   /** Plan-item ids changed by the most recent approved adaptation (highlight). */
   changedPlanIds: string[];
+  /** Previous row copy for changed items, captured before updated_plan replaces them. */
+  planMorphs: Record<string, { prevTitle: string; prevDetail?: string }>;
+  /** Bumps on every adapted plan patch so row animations can replay. */
+  morphSeq: number;
+  /** Impact badge labels changed by the most recent adaptation. */
+  changedImpactLabels: string[];
   proposalStatuses: ProposalStatusMap;
   adaptations: Proposal[];
   eventChips: EventChip[];
@@ -114,6 +120,9 @@ const INITIAL_STATE: UiState = {
   plan: null,
   pristinePlan: null,
   changedPlanIds: [],
+  planMorphs: {},
+  morphSeq: 0,
+  changedImpactLabels: [],
   proposalStatuses: {},
   adaptations: [],
   eventChips: [],
@@ -303,6 +312,9 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         working: false,
         draftItems: [],
         changedPlanIds: [],
+        planMorphs: {},
+        morphSeq: 0,
+        changedImpactLabels: [],
         eventChips: buildEventChips(message),
         firedEventIds: [],
         firingEventId: null,
@@ -335,6 +347,16 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
       // card can highlight them. Everything else about the card is preserved.
       const updated = message.payload.updated_plan;
       if (updated && updated.length > 0 && next.plan) {
+        const changedIds = message.payload.changed_ids ?? [];
+        const currentItems = new Map(next.plan.payload.plan.map((item) => [item.id, item]));
+        const planMorphs = Object.fromEntries(
+          changedIds.flatMap((id) => {
+            const item = currentItems.get(id);
+            return item
+              ? [[id, { prevTitle: item.title, prevDetail: item.detail }]]
+              : [];
+          }),
+        );
         next = {
           ...next,
           plan: {
@@ -345,7 +367,10 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
               impact: mergeImpact(next.plan.payload.impact, message.payload.impact_delta ?? []),
             },
           },
-          changedPlanIds: message.payload.changed_ids ?? [],
+          changedPlanIds: changedIds,
+          planMorphs,
+          morphSeq: next.morphSeq + 1,
+          changedImpactLabels: (message.payload.impact_delta ?? []).map((badge) => badge.label),
         };
       }
       for (const executed of message.payload.executed ?? []) {
@@ -395,6 +420,10 @@ function reducer(state: UiState, action: UiAction): UiState {
         draftItems: [],
         plan: null,
         pristinePlan: null,
+        changedPlanIds: [],
+        planMorphs: {},
+        morphSeq: 0,
+        changedImpactLabels: [],
         proposalStatuses: {},
         adaptations: [],
         eventChips: [],
@@ -446,6 +475,9 @@ function reducer(state: UiState, action: UiAction): UiState {
         ...state,
         plan: state.pristinePlan,
         changedPlanIds: [],
+        planMorphs: {},
+        morphSeq: 0,
+        changedImpactLabels: [],
         proposalStatuses: {},
         adaptations: [],
         eventChips: state.pristinePlan ? buildEventChips(state.pristinePlan) : [],
@@ -593,6 +625,9 @@ export default function App() {
             <PlanCard
               plan={state.plan}
               changedIds={state.changedPlanIds}
+              morphs={state.planMorphs}
+              morphSeq={state.morphSeq}
+              changedImpactLabels={state.changedImpactLabels}
               proposalStatuses={state.proposalStatuses}
               onDecide={(decisions) =>
                 sendDecisions(state.plan!.goal_id, state.plan!.correlation_id, decisions)

@@ -142,6 +142,48 @@ summary:focus-visible {
   to   { opacity: 1; transform: translateX(0); }
 }
 
+@keyframes strike-draw {
+  to { transform: scaleX(1); }
+}
+
+@keyframes old-collapse {
+  to {
+    opacity: 0;
+    max-height: 0;
+    margin: 0;
+  }
+}
+
+@keyframes morph-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes card-pulse {
+  0%, 100% {
+    box-shadow: inset 3px 0 0 0 var(--accent), 0 0 0 0 var(--accent-glow);
+  }
+  50% {
+    box-shadow: inset 3px 0 0 0 var(--accent), 0 0 24px 2px var(--accent-glow);
+  }
+}
+
+@keyframes badge-tick {
+  0% {
+    opacity: 0.72;
+    transform: scale(1);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1.12);
+    background: var(--accent-soft);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 1ms !important;
@@ -470,15 +512,12 @@ summary:focus-visible {
   animation: card-enter var(--dur-slow) var(--ease-out) both;
   animation-delay: calc(var(--i) * 55ms);
 }
-/* a row an approved daily adaptation just changed — accent edge + one-shot flash */
+/* a row an approved daily adaptation just changed — accent edge + morph pulse */
+.plan-item--morph,
 .plan-item--changed {
   border-color: var(--accent);
   box-shadow: inset 3px 0 0 0 var(--accent);
-  animation: plan-item-flash 1.4s var(--ease-out) both;
-}
-@keyframes plan-item-flash {
-  0%   { background: var(--accent-soft); }
-  100% { background: var(--bg-raise); }
+  animation: card-pulse 800ms var(--ease-out) 0ms 2 both;
 }
 .plan-item__updated-badge {
   flex: none;
@@ -497,15 +536,53 @@ summary:focus-visible {
   display: flex;
   justify-content: space-between;
   gap: 0.8rem;
-  align-items: baseline;
+  align-items: flex-start;
+}
+.plan-item__title-stack {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .plan-item__title { line-height: 1.25; }
+.plan-item__old {
+  display: block;
+  max-height: 1.6em;
+  margin-bottom: 0.12rem;
+  overflow: hidden;
+  position: relative;
+  color: var(--ink-faint);
+  font-size: 0.85em;
+  line-height: 1.25;
+  text-decoration: none;
+  animation: old-collapse 300ms var(--ease-out) 650ms both;
+}
+.plan-item__old::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 55%;
+  width: 100%;
+  height: 1.5px;
+  background: var(--danger);
+  transform: scaleX(0);
+  transform-origin: left;
+  animation: strike-draw 350ms var(--ease-out) both;
+}
+.plan-item__title--in,
+.plan-item__detail--in {
+  animation: morph-in 450ms var(--ease-out) 500ms both;
+}
+.plan-item__title--in {
+  display: inline-block;
+}
 .plan-item__when {
   flex: none;
   color: var(--ink-faint);
   font-size: 0.76rem;
 }
 .plan-item__detail { color: var(--ink-dim); font-size: 0.88rem; }
+.plan-item__detail--in {
+  display: block;
+}
 .plan-item__footer {
   display: flex;
   align-items: center;
@@ -542,11 +619,16 @@ summary:focus-visible {
 
 .impact-badges { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .impact-badge {
+  display: inline-flex;
+  align-items: baseline;
   font-size: 0.8rem;
   color: var(--ink-dim);
   border: 1px solid var(--stroke);
   border-radius: var(--radius-s);
   padding: 0.3rem 0.6rem;
+}
+.impact-badge--tick {
+  animation: badge-tick 600ms var(--ease-spring) 700ms both;
 }
 .impact-badge strong { color: var(--accent); margin-right: 0.25rem; }
 

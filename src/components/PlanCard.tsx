@@ -20,15 +20,24 @@
  *
  */
 
+import { useEffect, useMemo, useRef } from "react";
 import type { CSSProperties } from "react";
 import type { ApprovalDecision, PresentPlan } from "../types/contract";
 import type { ProposalStatusMap } from "../types/ui";
 import { ProposalList } from "./ProposalList";
 
+type PlanMorph = { prevTitle: string; prevDetail?: string };
+
 export interface PlanCardProps {
   plan: PresentPlan;
   /** Ids changed by the most recent approved daily adaptation — highlighted. */
   changedIds?: string[];
+  /** Previous row copy captured before the adapted plan replaced it. */
+  morphs?: Record<string, PlanMorph>;
+  /** Sequence that bumps per adapted plan patch, replaying changed-row animations. */
+  morphSeq?: number;
+  /** Impact labels changed by the most recent adaptation. */
+  changedImpactLabels?: string[];
   proposalStatuses: ProposalStatusMap;
   onDecide: (decisions: ApprovalDecision[]) => void;
 }
@@ -54,9 +63,32 @@ function knewValue(value: unknown): string {
   return String(value);
 }
 
-export function PlanCard({ plan, changedIds = [], proposalStatuses, onDecide }: PlanCardProps) {
+export function PlanCard({
+  plan,
+  changedIds = [],
+  morphs = {},
+  morphSeq = 0,
+  changedImpactLabels = [],
+  proposalStatuses,
+  onDecide,
+}: PlanCardProps) {
   const { payload } = plan;
-  const changed = new Set(changedIds);
+  const changed = useMemo(() => new Set(changedIds), [changedIds]);
+  const changedImpact = useMemo(
+    () => new Set(changedImpactLabels),
+    [changedImpactLabels],
+  );
+  const firstChangedId = changedIds[0];
+  const changedRowRef = useRef<HTMLLIElement | null>(null);
+
+  useEffect(() => {
+    if (morphSeq === 0 || !changedRowRef.current) return;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    changedRowRef.current.scrollIntoView({
+      behavior: reducedMotion ? "auto" : "smooth",
+      block: "center",
+    });
+  }, [morphSeq]);
 
   return (
     <article className="plan-card" aria-label="Proposed plan">
@@ -90,54 +122,71 @@ export function PlanCard({ plan, changedIds = [], proposalStatuses, onDecide }: 
       </div>
 
       <ol className="plan-items">
-        {payload.plan.map((item, index) => (
-          <li
-            key={item.id}
-            className={changed.has(item.id) ? "plan-item plan-item--changed" : "plan-item"}
-            style={{ "--i": index } as CSSProperties}
-          >
-            <div className="plan-item__topline">
-              <strong className="plan-item__title">{item.title}</strong>
-              {changed.has(item.id) ? (
-                <span className="plan-item__updated-badge">Updated</span>
-              ) : null}
-              {formatWhen(item.when) ? (
-                <time className="plan-item__when" dateTime={item.when}>
-                  {formatWhen(item.when)}
-                </time>
-              ) : null}
-            </div>
-            <span className="plan-item__detail">{item.detail}</span>
-            <div className="plan-item__footer">
-              {item.why.length > 0 ? (
-                <details className="why-popover">
-                  <summary>{item.why[0]}</summary>
-                  {item.why.length > 1 ? (
-                    <ul>
-                      {item.why.slice(1, 4).map((reason) => (
-                        <li key={reason}>{reason}</li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </details>
-              ) : null}
-              {item.tags.length > 0 ? (
-                <div className="tag-row" aria-label="Tags">
-                  {item.tags.slice(0, 4).map((tag) => (
-                    <span key={tag} className="tag-chip">
-                      {tag}
-                    </span>
-                  ))}
+        {payload.plan.map((item, index) => {
+          const isChanged = changed.has(item.id);
+          const morph = morphs[item.id];
+          const when = formatWhen(item.when);
+
+          return (
+            <li
+              key={`${item.id}:${isChanged ? morphSeq : 0}`}
+              ref={firstChangedId === item.id ? changedRowRef : undefined}
+              className={isChanged ? "plan-item plan-item--morph" : "plan-item"}
+              style={{ "--i": index } as CSSProperties}
+            >
+              <div className="plan-item__topline">
+                <div className="plan-item__title-stack">
+                  {morph ? <s className="plan-item__old">{morph.prevTitle}</s> : null}
+                  <strong className={morph ? "plan-item__title plan-item__title--in" : "plan-item__title"}>
+                    {item.title}
+                  </strong>
                 </div>
-              ) : null}
-            </div>
-          </li>
-        ))}
+                {isChanged ? (
+                  <span className="plan-item__updated-badge">Updated</span>
+                ) : null}
+                {when ? (
+                  <time className="plan-item__when" dateTime={item.when}>
+                    {when}
+                  </time>
+                ) : null}
+              </div>
+              <span className={morph ? "plan-item__detail plan-item__detail--in" : "plan-item__detail"}>
+                {item.detail}
+              </span>
+              <div className="plan-item__footer">
+                {item.why.length > 0 ? (
+                  <details className="why-popover">
+                    <summary>{item.why[0]}</summary>
+                    {item.why.length > 1 ? (
+                      <ul>
+                        {item.why.slice(1, 4).map((reason) => (
+                          <li key={reason}>{reason}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </details>
+                ) : null}
+                {item.tags.length > 0 ? (
+                  <div className="tag-row" aria-label="Tags">
+                    {item.tags.slice(0, 4).map((tag) => (
+                      <span key={tag} className="tag-chip">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
       </ol>
 
       <div className="impact-badges">
         {payload.impact.map((badge) => (
-          <span key={badge.label} className="impact-badge">
+          <span
+            key={`${badge.label}:${changedImpact.has(badge.label) ? morphSeq : 0}`}
+            className={changedImpact.has(badge.label) ? "impact-badge impact-badge--tick" : "impact-badge"}
+          >
             <strong>{badge.value}</strong> {badge.label}
           </span>
         ))}
