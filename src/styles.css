@@ -575,8 +575,16 @@ summary:focus-visible {
 
 .transcript-note {
   margin: 0;
-  color: var(--ink-dim);
-  font-size: 0.88rem;
+  padding: 0.85rem 1.05rem;
+  color: var(--ink);
+  font-size: 0.98rem;
+  line-height: 1.5;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.025)),
+    var(--surface);
+  border: 1px solid var(--stroke);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-m, 12px);
 }
 
 .understanding-card {

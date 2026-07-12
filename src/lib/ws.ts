@@ -33,6 +33,7 @@ const INBOUND_TYPES = new Set([
   "present_plan",
   "proposal",
   "status",
+  "notice",
 ]);
 
 export interface GoalFlowSocketOptions {

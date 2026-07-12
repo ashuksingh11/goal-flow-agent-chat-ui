@@ -327,6 +327,40 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         phase: maxRailPhase(withGoal.phase, "confirming"),
       };
 
+    case "notice":
+      // Terminal, non-plan message (e.g. an out-of-scope decline). The goal
+      // never reached the device — clear the stage and surface the redirect as a
+      // prominent transcript note (activeGoalId=null lets the note render).
+      return {
+        ...withGoal,
+        nextId: withGoal.nextId + 1,
+        transcript: [
+          ...withGoal.transcript,
+          { kind: "note", id: withGoal.nextId, text: message.message },
+        ],
+        activeGoalId: null,
+        declinedGoalId: message.goal_id,
+        understanding: null,
+        phase: null,
+        working: false,
+        agentEntries: [],
+        draftItems: [],
+        plan: null,
+        pristinePlan: null,
+        changedPlanIds: [],
+        planMorphs: {},
+        morphSeq: 0,
+        changedImpactLabels: [],
+        proposalStatuses: {},
+        adaptations: [],
+        eventChips: [],
+        firedEventIds: [],
+        firingEventId: null,
+        approved: false,
+        ticks: [],
+        lastSeq: 0,
+      };
+
     case "present_plan":
       return {
         ...withGoal,

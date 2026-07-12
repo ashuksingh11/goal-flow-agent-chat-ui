@@ -53,6 +53,8 @@ function describeFrame(frame: FlowFrame): string {
       return `${message.command} → cloud`;
     case "status":
       return `${message.task_status}${message.payload.material ? " · material" : ""}`;
+    case "notice":
+      return `notice · ${message.kind}`;
   }
 }
 

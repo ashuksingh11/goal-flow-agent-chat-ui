@@ -441,6 +441,22 @@ export interface Status {
 }
 
 // ---------------------------------------------------------------------------
+// notice (cloud → UI) — a terminal, non-plan message
+// ---------------------------------------------------------------------------
+
+/**
+ * A terminal, non-plan message. Sent when the graph ends before any device
+ * dispatch — today, when the interpreter declines an out-of-scope goal
+ * (GoalFlow only acts on meal plans + guest dinners).
+ */
+export interface Notice {
+  type: "notice";
+  goal_id: string;
+  kind: "out_of_scope" | "declined";
+  message: string;
+}
+
+// ---------------------------------------------------------------------------
 // control (UI → cloud → device) — demo clock controls
 // ---------------------------------------------------------------------------
 
@@ -480,6 +496,7 @@ export type ContractMessage =
   | Approval
   | Proposal
   | Status
+  | Notice
   | Control;
 
 /** Messages the UI can RECEIVE from the cloud. */
@@ -490,7 +507,8 @@ export type UiInboundMessage =
   | Understanding
   | PresentPlan
   | Proposal
-  | Status;
+  | Status
+  | Notice;
 
 /** Messages the UI can SEND to the cloud. */
 export type UiOutboundMessage = Hello | UserGoal | UnderstandingResponse | Approval | Control;
