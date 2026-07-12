@@ -374,31 +374,63 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
       // card can highlight them. Everything else about the card is preserved.
       const updated = message.payload.updated_plan;
       if (updated && updated.length > 0 && next.plan) {
-        const changedIds = message.payload.changed_ids ?? [];
-        const currentItems = new Map(next.plan.payload.plan.map((item) => [item.id, item]));
-        const planMorphs = Object.fromEntries(
-          changedIds.flatMap((id) => {
-            const item = currentItems.get(id);
-            return item
-              ? [[id, { prevTitle: item.title, prevDetail: item.detail }]]
-              : [];
-          }),
-        );
-        next = {
-          ...next,
-          plan: {
-            ...next.plan,
-            payload: {
-              ...next.plan.payload,
-              plan: updated,
-              impact: mergeImpact(next.plan.payload.impact, message.payload.impact_delta ?? []),
-            },
-          },
-          changedPlanIds: changedIds,
-          planMorphs,
-          morphSeq: next.morphSeq + 1,
-          changedImpactLabels: (message.payload.impact_delta ?? []).map((badge) => badge.label),
+        const prevItems = next.plan.payload.plan;
+        const prevById = new Map(prevItems.map((item) => [item.id, item]));
+        // The row a changed id replaced: same id first, then the row that held
+        // the slot (same day, then same position) — a swapped row often arrives
+        // under a FRESH id, and an id-only lookup silently drops the morph.
+        const prevForRow = (id: string) => {
+          const index = updated.findIndex((item) => item.id === id);
+          const row = updated[index];
+          if (!row) return undefined;
+          return (
+            prevById.get(id) ??
+            prevItems.find((prev) => prev.day === row.day) ??
+            prevItems[index]
+          );
         };
+        // A row is changed only when its title/detail ACTUALLY differ from the
+        // row it replaced. Do NOT trust changed_ids alone: the device re-sends
+        // the same updated_plan on later monitoring ticks, and force-including
+        // those ids would recompute an empty morph on the echo and WIPE the
+        // just-set cancelled-dish morph. (changed_ids still informs prevForRow's
+        // id lookup; it just can't force an unchanged row to count as changed.)
+        const changedIds = updated
+          .filter((item) => {
+            const prev = prevForRow(item.id);
+            return prev != null && (prev.title !== item.title || prev.detail !== item.detail);
+          })
+          .map((item) => item.id);
+        // Only (re)apply when something really changed. An identical echo must
+        // leave the plan — and the persistent morph — untouched.
+        if (changedIds.length > 0) {
+          const planMorphs = Object.fromEntries(
+            changedIds.flatMap((id) => {
+              const prev = prevForRow(id);
+              const row = updated.find((item) => item.id === id);
+              // Skip the strike only when the title is IDENTICAL — striking the
+              // same text as the new title would read as a glitch.
+              return prev && row && prev.title !== row.title
+                ? [[id, { prevTitle: prev.title, prevDetail: prev.detail }]]
+                : [];
+            }),
+          );
+          next = {
+            ...next,
+            plan: {
+              ...next.plan,
+              payload: {
+                ...next.plan.payload,
+                plan: updated,
+                impact: mergeImpact(next.plan.payload.impact, message.payload.impact_delta ?? []),
+              },
+            },
+            changedPlanIds: changedIds,
+            planMorphs,
+            morphSeq: next.morphSeq + 1,
+            changedImpactLabels: (message.payload.impact_delta ?? []).map((badge) => badge.label),
+          };
+        }
       }
       for (const executed of message.payload.executed ?? []) {
         next = {

@@ -173,11 +173,13 @@ summary:focus-visible {
   to   { opacity: 1; transform: translateX(0); }
 }
 
-@keyframes old-collapse {
-  to {
-    opacity: 0;
-    max-height: 0;
-    margin: 0;
+/* Cancelled line: prominent (title-sized) for the hold, then settles to a
+   compact caption — it NEVER disappears, so the swap stays legible even if
+   the user looks over later. */
+@keyframes old-settle {
+  from {
+    font-size: 1rem;
+    text-decoration-thickness: 3px;
   }
 }
 
@@ -743,27 +745,61 @@ summary:focus-visible {
   min-width: 0;
 }
 .plan-item__title { line-height: 1.25; }
+/* Red banner carrying the cancelled row: label + struck old title on its own
+   line. It PERSISTS after the morph (compact) — the strike alone proved too
+   easy to miss, especially when old and new titles read nearly the same. */
+.plan-item__old-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  width: fit-content;
+  max-width: 100%;
+  margin-bottom: 0.3rem;
+  padding: 0.16rem 0.55rem;
+  border-radius: var(--radius-s);
+  background: rgba(255, 107, 107, 0.1);
+  box-shadow: inset 2px 0 0 0 var(--danger);
+}
+.plan-item__old-label {
+  flex: none;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--danger);
+}
 .plan-item__old {
-  display: block;
-  max-height: 1.8em;
-  margin-bottom: 0.2rem;
-  overflow: hidden;
-  /* The cancelled dish must read at a glance: title-sized, bold, red, with a
-     bold NATIVE strike-through. Native line-through is reliable and always
-     visible — no pseudo-element / fit-content games (which regressed to
-     showing no strike at all). */
+  min-width: 0;
+  /* Settled (persistent) state — the old-settle keyframe starts it
+     title-sized, holds 4s, then eases down to this caption. Native
+     line-through only: pseudo-element strikes regressed to none. */
   color: var(--danger);
   font-weight: 600;
-  font-size: 1rem;
+  font-size: 0.8rem;
   line-height: 1.3;
   text-decoration: line-through;
   text-decoration-color: var(--danger);
-  text-decoration-thickness: 3px;
-  animation: old-collapse 350ms var(--ease-out) 2600ms both;
+  text-decoration-thickness: 2px;
+  animation: old-settle 500ms var(--ease-out) 4000ms both;
 }
+.plan-item__new-label {
+  display: inline-block;
+  margin-right: 0.45rem;
+  transform: translateY(-0.08em);
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 0.1rem 0.4rem;
+}
+/* New copy slides in QUICKLY (not after the hold) so cancelled + replacement
+   read together as "was X → now Y" with no information gap. */
 .plan-item__title--in,
 .plan-item__detail--in {
-  animation: morph-in 520ms var(--ease-out) 2600ms both;
+  animation: morph-in 520ms var(--ease-out) 450ms both;
 }
 .plan-item__title--in {
   display: inline-block;
@@ -779,12 +815,16 @@ summary:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* No motion at all: everything lands in its SETTLED state instantly. The
+     cancelled line persists, so nothing is lost by skipping the hold.
+     (The old `animation-delay: 0ms` here made old-collapse fire almost
+     immediately — reduced-motion users barely ever saw the struck dish.) */
   .plan-item--morph,
   .plan-item--changed,
   .plan-item__old,
   .plan-item__title--in,
   .plan-item__detail--in {
-    animation-delay: 0ms;
+    animation: none;
   }
 }
 

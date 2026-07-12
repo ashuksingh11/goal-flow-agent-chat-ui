@@ -123,8 +123,17 @@ export function PlanCard({
             >
               <div className="plan-item__topline">
                 <div className="plan-item__title-stack">
-                  {morph ? <s className="plan-item__old">{morph.prevTitle}</s> : null}
+                  {/* Explicit "Cancelled → New" framing: the labels carry the
+                      story even when old and new titles are near-identical,
+                      and the cancelled line PERSISTS after the morph settles. */}
+                  {morph ? (
+                    <span className="plan-item__old-line">
+                      <span className="plan-item__old-label">Cancelled</span>
+                      <s className="plan-item__old">{morph.prevTitle}</s>
+                    </span>
+                  ) : null}
                   <strong className={morph ? "plan-item__title plan-item__title--in" : "plan-item__title"}>
+                    {morph ? <span className="plan-item__new-label">New</span> : null}
                     {item.title}
                   </strong>
                 </div>
