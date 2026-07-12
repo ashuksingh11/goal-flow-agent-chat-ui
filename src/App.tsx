@@ -504,10 +504,12 @@ function reducer(state: UiState, action: UiAction): UiState {
     case "decisions_sent": {
       const proposalStatuses = { ...state.proposalStatuses };
       for (const decision of action.decisions) {
-        proposalStatuses[decision.proposal_id] = {
-          state: "pending",
-          approved: decision.approved,
-        };
+        // A DECLINE resolves immediately — nothing gets executed, so no status
+        // frame will ever confirm it; leaving it "pending" stuck the card on
+        // "Waiting for confirmation" forever. Only approvals wait for the device.
+        proposalStatuses[decision.proposal_id] = decision.approved
+          ? { state: "pending", approved: true }
+          : { state: "done", approved: false };
       }
       // The event strip unlocks once the user has approved every approval-required
       // proposal on the initial plan. Pending approvals count because the user
