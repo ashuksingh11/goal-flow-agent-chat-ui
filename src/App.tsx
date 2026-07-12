@@ -647,6 +647,11 @@ export default function App() {
   };
 
   const planPending = state.working && !state.plan;
+  const goalDisabled =
+    connection !== "open" ||
+    state.working ||
+    state.understanding !== null ||
+    state.plan !== null;
   const hasEventStrip = (state.plan?.payload.demo_events?.length ?? 0) > 0;
   const latestNote = [...state.transcript].reverse().find((entry) => entry.kind === "note");
 
@@ -677,7 +682,7 @@ export default function App() {
 
       <main className={presenterMode ? "stage stage--with-feed" : "stage"}>
         <section className="stage__main">
-          <GoalComposer onSubmit={submitGoal} disabled={connection !== "open"} />
+          <GoalComposer onSubmit={submitGoal} disabled={goalDisabled} />
 
           {latestNote && !state.activeGoalId && !state.working && !state.plan ? (
             <p className="transcript-note">{latestNote.text}</p>
@@ -693,10 +698,15 @@ export default function App() {
             />
           ) : null}
 
-          {/* The live "watch it think" stream is for the WORKING phase; once the
-              plan is the hero it collapses (raw trail stays in presenter mode). */}
+          {/* The live status is for the WORKING phase; once the plan is the hero
+              it collapses (raw trail stays in presenter mode). */}
           {!state.understanding && !state.plan && (state.agentEntries.length > 0 || state.working) ? (
-            <AgentStream entries={state.agentEntries} active={state.working} />
+            <AgentStream
+              entries={state.agentEntries}
+              active={state.working}
+              phase={state.phase}
+              planPending={planPending}
+            />
           ) : null}
 
           {planPending ? (

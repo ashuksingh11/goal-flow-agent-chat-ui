@@ -10,6 +10,7 @@
  *
  */
 
+import { useRef } from "react";
 import { RAIL_PHASES } from "../types/ui";
 import type { RailPhase } from "../types/ui";
 
@@ -33,6 +34,12 @@ function stepState(step: RailPhase, current: RailPhase | null): StepState {
 
 export function ProgressRail({ phase }: ProgressRailProps) {
   const currentOrder = phase === null ? -1 : RAIL_PHASES.findIndex((p) => p.id === phase);
+  const reachedRef = useRef<Set<RailPhase>>(
+    new Set(RAIL_PHASES.slice(0, currentOrder + 1).map((step) => step.id)),
+  );
+  if (phase === null && reachedRef.current.size > 0) {
+    reachedRef.current.clear();
+  }
 
   return (
     <nav
@@ -41,13 +48,24 @@ export function ProgressRail({ phase }: ProgressRailProps) {
     >
       {RAIL_PHASES.map((step, index) => {
         const state = stepState(step.id, phase);
-        const connectorDone = index > 0 && index <= currentOrder;
+        const reached = state !== "todo";
+        const entering = reached && !reachedRef.current.has(step.id);
+        if (entering) reachedRef.current.add(step.id);
+        const connectorDone = index < currentOrder;
         return (
           <div
             key={step.id}
-            className={`rail-step rail-step--${state} rail-step--${step.agent}`}
+            className={`rail-step rail-step--${state} rail-step--${step.agent}${
+              entering ? " rail-step--enter" : ""
+            }`}
           >
-            {index > 0 ? (
+            <span className="rail-marker">
+              <span className="rail-dot" aria-hidden="true">
+                {state === "done" ? "✓" : null}
+              </span>
+              <span className="rail-label">{step.label}</span>
+            </span>
+            {index < RAIL_PHASES.length - 1 ? (
               <span
                 className={
                   connectorDone
@@ -57,12 +75,6 @@ export function ProgressRail({ phase }: ProgressRailProps) {
                 aria-hidden="true"
               />
             ) : null}
-            <span className="rail-marker">
-              <span className="rail-dot" aria-hidden="true">
-                {state === "done" ? "✓" : null}
-              </span>
-              <span className="rail-label">{step.label}</span>
-            </span>
           </div>
         );
       })}

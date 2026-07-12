@@ -128,20 +128,20 @@ summary:focus-visible {
   50%      { box-shadow: 0 0 0 8px var(--rail-glow-clear, var(--accent-glow-clear)); }
 }
 
-@keyframes rail-reveal {
+@keyframes rail-step-enter {
   0% {
     opacity: 0;
-    transform: translateY(5px) scale(0.9);
+    transform: translateX(-10px) scale(0.94);
     filter: drop-shadow(0 0 0 var(--rail-glow, var(--accent-glow)));
   }
-  55% {
+  58% {
     opacity: 1;
-    transform: translateY(0) scale(1.08);
-    filter: drop-shadow(0 0 12px var(--rail-glow, var(--accent-glow)));
+    transform: translateX(0) scale(1.08);
+    filter: drop-shadow(0 0 14px var(--rail-glow, var(--accent-glow)));
   }
   100% {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateX(0) scale(1);
     filter: drop-shadow(0 0 0 var(--rail-glow, var(--accent-glow)));
   }
 }
@@ -156,6 +156,15 @@ summary:focus-visible {
 @keyframes caret-blink {
   0%, 55% { opacity: 1; }
   56%, 100% { opacity: 0; }
+}
+
+@keyframes status-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes status-glow {
+  0%, 100% { box-shadow: 0 0 0 var(--accent-glow-clear); }
+  50% { box-shadow: 0 0 18px var(--accent-glow); }
 }
 
 /* sustain tick fade-in */
@@ -256,7 +265,7 @@ summary:focus-visible {
   display: flex;
   align-items: center;
   gap: 0;
-  padding: 0.75rem 0.25rem;
+  padding: 0.75rem 0.25rem 1.65rem;
   opacity: 1;
   transition: opacity var(--dur) var(--ease-out);
 }
@@ -271,6 +280,9 @@ summary:focus-visible {
   flex: 1;
   min-width: 0;
 }
+.rail-step:last-child {
+  flex: none;
+}
 .rail-step--device {
   --rail-color: var(--good);
   --rail-soft: var(--good-soft);
@@ -281,7 +293,7 @@ summary:focus-visible {
   flex: 1;
   height: 2px;
   background: var(--stroke);
-  margin: 0 0.4rem;
+  margin: 0;
   position: relative;
   overflow: hidden;
   border-radius: 999px;
@@ -307,9 +319,11 @@ summary:focus-visible {
 .rail-marker {
   display: inline-flex;
   align-items: center;
+  position: relative;
+  flex: none;
   min-width: 0;
   opacity: 1;
-  transform: translateY(0) scale(1);
+  transform: translateX(0) scale(1);
   transition:
     opacity var(--dur) var(--ease-out),
     transform var(--dur) var(--ease-out),
@@ -333,7 +347,10 @@ summary:focus-visible {
     transform var(--dur) var(--ease-out);
 }
 .rail-label {
-  margin-left: 0.45rem;
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 0.38rem);
+  transform: translateX(-50%);
   font-size: 0.78rem;
   color: var(--rail-color);
   white-space: nowrap;
@@ -343,7 +360,7 @@ summary:focus-visible {
 .rail-step--todo .rail-connector,
 .rail-step--todo .rail-marker {
   opacity: 0;
-  transform: translateY(5px) scale(0.94);
+  transform: translateX(-10px) scale(0.94);
 }
 
 .rail-step--active .rail-dot {
@@ -352,11 +369,8 @@ summary:focus-visible {
   animation: rail-pulse 1.6s var(--ease-out) infinite;
   transform: scale(1.08);
 }
-.rail-step--active .rail-marker,
-.rail-step--active .rail-connector,
-.rail-step--done .rail-marker,
-.rail-step--done .rail-connector {
-  animation: rail-reveal var(--dur-slow) var(--ease-spring) both;
+.rail-step--enter .rail-marker {
+  animation: rail-step-enter 450ms var(--ease-spring) both;
 }
 .rail-step--active .rail-label { font-weight: 600; }
 .rail-step--done .rail-dot {
@@ -367,10 +381,7 @@ summary:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   .rail-step--active .rail-dot,
-  .rail-step--active .rail-marker,
-  .rail-step--active .rail-connector,
-  .rail-step--done .rail-marker,
-  .rail-step--done .rail-connector {
+  .rail-step--enter .rail-marker {
     animation: none;
   }
 }
@@ -388,6 +399,10 @@ summary:focus-visible {
   padding: 0.75rem 1rem;
 }
 .goal-composer input[type="text"]:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.goal-composer input[type="text"]:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
 
 /* ---------------------------- agent stream ------------------------------- */
 
@@ -424,24 +439,39 @@ summary:focus-visible {
   animation: rail-pulse 1.4s var(--ease-out) infinite;
 }
 
-.thinking-line {
+.agent-status {
   width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+.agent-status__spinner {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid var(--accent-soft);
+  border-top-color: var(--accent);
+  box-shadow: 0 0 16px var(--accent-glow-clear);
+}
+.agent-status--active .agent-status__spinner {
+  animation: status-spin 900ms linear infinite, status-glow 1.8s var(--ease-out) infinite;
+}
+.agent-status__text {
+  flex: 1;
   margin: 0;
   color: var(--ink);
-  font-size: 0.95rem;
-  line-height: 1.55;
-  min-height: 1.55em;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
-.thinking-line--empty { color: var(--ink-dim); }
-.thinking-line__caret {
-  display: inline-block;
-  width: 0.55em;
-  height: 1.05em;
-  margin-left: 0.2rem;
-  vertical-align: -0.15em;
-  border-right: 2px solid var(--accent);
-  animation: caret-blink 1s step-end infinite;
+.agent-status__helper {
+  width: 100%;
+  margin: -0.1rem 0 0 1.95rem;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  line-height: 1.4;
 }
 .tool-chip-row {
   display: flex;
@@ -1157,7 +1187,7 @@ summary:focus-visible {
   }
   .progress-rail {
     overflow-x: auto;
-    padding-bottom: 0.9rem;
+    padding-bottom: 1.65rem;
   }
   .rail-step {
     min-width: 128px;
