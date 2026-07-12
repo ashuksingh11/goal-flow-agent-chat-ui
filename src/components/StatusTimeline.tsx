@@ -26,11 +26,12 @@ function tickLabel(tick: Status): string {
 }
 
 function tickDay(tick: Status): string {
-  if (tick.payload.day) return tick.payload.day;
-  if (!tick.payload.sim_date) return "";
-  const date = new Date(`${tick.payload.sim_date}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(date);
+  const match = tick.payload.note?.match(/\bDay\s+\d+\b/);
+  if (match) return match[0];
+  const day = tick.payload.day?.trim();
+  if (!day) return "";
+  if (/^Day\s+\d+$/.test(day)) return day;
+  return /^\d+$/.test(day) ? `Day ${day}` : "";
 }
 
 export function StatusTimeline({ ticks }: StatusTimelineProps) {

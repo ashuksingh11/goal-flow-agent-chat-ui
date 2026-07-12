@@ -44,6 +44,7 @@ export function EventStrip({
         {ordered.map((event) => {
           const fired = firedIds.includes(event.id);
           const firing = firingId === event.id;
+          const dayLabel = `Day ${event.day}`;
           const locked = !enabled;
           const disabled = locked || fired || anyFiring;
           const stateClass = firing
@@ -59,12 +60,12 @@ export function EventStrip({
               key={event.id}
               type="button"
               className={`event-chip ${stateClass}`}
-              title={`${event.label} - ${event.title}`}
+              title={`${dayLabel} - ${event.title}`}
               disabled={disabled}
               aria-busy={firing || undefined}
               onClick={() => onFire(event.id)}
             >
-              <span className="event-chip__label">{event.label}</span>
+              <span className="event-chip__label">{dayLabel}</span>
               <span className="event-chip__title">{event.title}</span>
               <span className="event-chip__glyph" aria-hidden="true">
                 {firing ? <span className="event-chip__spinner" /> : fired ? "✓" : null}

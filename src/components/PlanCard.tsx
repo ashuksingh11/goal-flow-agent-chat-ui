@@ -42,19 +42,6 @@ export interface PlanCardProps {
   onDecide: (decisions: ApprovalDecision[]) => void;
 }
 
-function formatWhen(when?: string): string | null {
-  if (!when) return null;
-  const date = new Date(when);
-  if (Number.isNaN(date.getTime())) return null;
-  return new Intl.DateTimeFormat(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
-}
-
 export function knewValue(value: unknown): string {
   // Defensive: only render primitives / string lists — never a raw object
   // (that would crash React). Objects/empties collapse to "".
@@ -125,7 +112,7 @@ export function PlanCard({
         {payload.plan.map((item, index) => {
           const isChanged = changed.has(item.id);
           const morph = morphs[item.id];
-          const when = formatWhen(item.when);
+          const day = item.day || index + 1;
 
           return (
             <li
@@ -144,11 +131,7 @@ export function PlanCard({
                 {isChanged ? (
                   <span className="plan-item__updated-badge">Updated</span>
                 ) : null}
-                {when ? (
-                  <time className="plan-item__when" dateTime={item.when}>
-                    {when}
-                  </time>
-                ) : null}
+                <span className="plan-item__when">Day {day}</span>
               </div>
               <span className={morph ? "plan-item__detail plan-item__detail--in" : "plan-item__detail"}>
                 {item.detail}

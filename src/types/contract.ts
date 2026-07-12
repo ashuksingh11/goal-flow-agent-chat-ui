@@ -213,6 +213,8 @@ export interface PlanItem {
   id: string;
   title: string;
   detail: string;
+  /** 1-based simulated day index for display ("Day N"). */
+  day: number;
   /** Optional ISO timestamp — when this step happens (relative to real today). */
   when?: string;
   /** Rationale bullets ("uses expiring paneer", "fits Dad's low-sodium"). */
@@ -253,6 +255,8 @@ export interface ImpactBadge {
 export interface DemoEvent {
   id: string;
   label: string;
+  /** 1-based simulated day index for display ("Day N"). */
+  day: number;
   title: string;
   kind: string;
   order: number;

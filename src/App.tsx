@@ -654,7 +654,9 @@ export default function App() {
     state.working ||
     state.understanding !== null ||
     state.plan !== null;
-  const hasEventStrip = (state.plan?.payload.demo_events?.length ?? 0) > 0;
+  const demoEventCount = state.plan?.payload.demo_events?.length ?? 0;
+  const hasEventStrip = demoEventCount > 0;
+  const hasDemoControls = state.plan !== null && demoEventCount === 0;
   const latestNote = [...state.transcript].reverse().find((entry) => entry.kind === "note");
 
   return (
@@ -768,7 +770,7 @@ export default function App() {
           onFire={fireEvent}
           onReset={resetWeek}
         />
-      ) : state.activeGoalId ? (
+      ) : hasDemoControls ? (
         <DemoControls clock={state.demoClock} onCommand={sendControl} />
       ) : null}
     </div>
