@@ -69,11 +69,30 @@ npm run dev             # Vite dev server
 
 `npm run build` runs `tsc -b && vite build` (type-checks the whole app).
 
-## Environment
+## Running across machines (LAN — cloud + tablet)
 
-| Variable      | Default                  | Notes                          |
-|---------------|--------------------------|--------------------------------|
-| `VITE_WS_URL` | `ws://localhost:8000/ws` | The cloud agent's WS endpoint. |
+Typical deployment: the **cloud hub** and this **UI** run on one Ubuntu box, the
+**device agent** runs on the Tizen Hub, and the UI is viewed in a **tablet
+browser**. The wiring is host-relative, so no IPs are baked into the build:
+
+1. **Cloud (Ubuntu):** `./run.sh` — already binds `0.0.0.0:8000` (reachable on the
+   LAN). If a firewall is in play, open TCP 8000.
+2. **UI (Ubuntu):** `npm run dev` — Vite binds all interfaces (`server.host`), so
+   the tablet can load it. **Leave `VITE_WS_URL` unset** (see Configuration): the
+   UI derives the hub URL from the host that served the page, so a tablet on
+   `http://<ubuntu-ip>:5173` connects to `ws://<ubuntu-ip>:8000/ws` automatically.
+3. **Tablet:** browse to `http://<ubuntu-ip>:5173`.
+4. **Device (Tizen Hub):** set `WS_URL=ws://<ubuntu-ip>:8000/ws` in `goalflow.conf`
+   (a Tizen service can't use env vars — see that repo's AGENTS.md).
+
+Everything routes through the cloud; the UI and device never talk directly.
+
+## Configuration
+
+| Variable       | Default                        | Notes                                                         |
+|----------------|--------------------------------|--------------------------------------------------------------|
+| `VITE_WS_URL`  | *(unset → derived from host)*  | Full override, e.g. `ws://192.168.1.50:8000/ws`. Leave unset to auto-derive `ws://<page-host>:8000/ws`. |
+| `VITE_WS_PORT` | `8000`                         | Port used by host-derivation when `VITE_WS_URL` is unset.     |
 
 ## Repo layout
 

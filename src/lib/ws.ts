@@ -57,12 +57,32 @@ export interface GoalFlowSocket {
   readonly state: ConnectionState;
 }
 
-const DEFAULT_WS_URL = "ws://localhost:8000/ws";
+const DEFAULT_WS_PORT = "8000";
+const FALLBACK_WS_URL = "ws://localhost:8000/ws";
 const RECONNECT_DELAY_MS = 1_500;
 
+/**
+ * Resolve the cloud hub WebSocket URL.
+ *
+ * 1. `VITE_WS_URL` — explicit override (full ws/wss URL), wins if set.
+ * 2. Otherwise derive it from the page's own origin: the same host that SERVED
+ *    the UI, on `VITE_WS_PORT` (default 8000), path `/ws`, and wss when the page
+ *    is https. This is what makes cross-machine deployment work — when a tablet
+ *    loads the UI from `http://<ubuntu-ip>:5173`, it connects the socket to
+ *    `ws://<ubuntu-ip>:8000/ws`, NOT to the tablet's own localhost.
+ * 3. Fallback to localhost only when there is no browser `window` (tests/SSR).
+ */
 function getConfiguredUrl() {
-  const env = (import.meta as unknown as { env?: { VITE_WS_URL?: string } }).env;
-  return env?.VITE_WS_URL || DEFAULT_WS_URL;
+  const env = (import.meta as unknown as { env?: { VITE_WS_URL?: string; VITE_WS_PORT?: string } }).env;
+  if (env?.VITE_WS_URL) {
+    return env.VITE_WS_URL;
+  }
+  if (typeof window !== "undefined" && window.location?.hostname) {
+    const proto = window.location.protocol === "https:" ? "wss" : "ws";
+    const port = env?.VITE_WS_PORT || DEFAULT_WS_PORT;
+    return `${proto}://${window.location.hostname}:${port}/ws`;
+  }
+  return FALLBACK_WS_URL;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
