@@ -220,14 +220,14 @@ are the only dependencies.
 
 ## Run & verify
 
+# Full-stack demo commands live in goal-flow-agents/docs/FINAL_DEMO.md.
 ```bash
-cp -n .env.example .env         # VITE_WS_URL=ws://localhost:8000/ws
 npm install
 npm run build                   # tsc -b && vite build (type-checks)
-npm run dev -- --host 127.0.0.1 --port 5173
+npm run dev                     # binds all interfaces; leave VITE_WS_URL unset (derives the hub from the page host)
 ```
 
-Open http://127.0.0.1:5173 (needs the cloud hub on :8000).
+Open http://localhost:5173 (needs the cloud hub on :8000).
 
 ## Extending it
 

@@ -61,11 +61,17 @@ the code walkthrough.
 
 ## How to run
 
+For the **full three-service demo** (cloud + device + UI), follow
+`goal-flow-agents/docs/FINAL_DEMO.md` — the single source of truth for run
+commands. To run just the UI:
+
 ```bash
 npm install
-cp .env.example .env    # points at the cloud hub
-npm run dev             # Vite dev server
+npm run dev             # Vite dev server, binds all interfaces (server.host)
 ```
+
+No `.env` is needed: with `VITE_WS_URL` unset the UI derives the hub URL from the
+host that served the page (see Configuration). Open http://localhost:5173.
 
 `npm run build` runs `tsc -b && vite build` (type-checks the whole app).
 
