@@ -54,6 +54,10 @@ export type ApprovalTier = "auto" | "light" | "firm" | "adapt";
 export interface Hello {
   type: "hello";
   role: Role;
+  /** Pairing key: the device_id this UI wants to watch (from `?device=<id>`).
+   *  Omitted/empty ⇒ the cloud auto-binds if there's one device, else the UI
+   *  awaits a `devices` list and picks one. */
+  device_id?: string;
 }
 
 /** Cloud → client: acknowledges registration and assigns a session. */
@@ -61,6 +65,8 @@ export interface HelloAck {
   type: "hello_ack";
   role: Role;
   session_id: string;
+  /** The device_id the cloud bound this connection to ("" if still unbound). */
+  device_id?: string;
 }
 
 // ---------------------------------------------------------------------------

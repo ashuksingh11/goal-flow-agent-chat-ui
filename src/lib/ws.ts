@@ -85,6 +85,22 @@ function getConfiguredUrl() {
   return FALLBACK_WS_URL;
 }
 
+/**
+ * The device_id this UI should pair with, from the `?device=<id>` query param
+ * (a home = one device agent + N UIs). Empty ⇒ let the cloud auto-bind the sole
+ * device, or (multiple) drive the picker. Query-param-based so it's per-tab and
+ * platform-independent (works in the Tizen Hub browser and on a tablet alike).
+ * `search` is injectable for testing.
+ */
+export function getDeviceId(search?: string): string {
+  const query = search ?? (typeof window !== "undefined" ? window.location?.search : "") ?? "";
+  try {
+    return new URLSearchParams(query).get("device")?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -155,7 +171,12 @@ function openSharedSocket() {
   ws.addEventListener("open", () => {
     if (!isCurrent()) return;
     setState("open");
-    const hello = { type: "hello", role: "ui" } satisfies UiOutboundMessage;
+    const deviceId = getDeviceId();
+    const hello = {
+      type: "hello",
+      role: "ui",
+      ...(deviceId ? { device_id: deviceId } : {}),
+    } satisfies UiOutboundMessage;
     ws.send(JSON.stringify(hello));
     for (const subscriber of subscribers) {
       subscriber.onSent?.(hello);
