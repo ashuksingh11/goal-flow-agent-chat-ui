@@ -35,6 +35,7 @@ import { Skeleton } from "./components/Skeleton";
 import { StatusTimeline } from "./components/StatusTimeline";
 import { UnderstandingCard } from "./components/UnderstandingCard";
 import { DevicePicker } from "./components/DevicePicker";
+import { PairedBar } from "./components/PairedBar";
 import { createGoalFlowSocket, getDeviceId, getRememberedDeviceId, rememberDeviceId } from "./lib/ws";
 import type { ConnectionState, GoalFlowSocket } from "./lib/ws";
 import type {
@@ -127,6 +128,8 @@ interface UiState {
    *  selection) rather than the cloud's auto-bind guess. An auto-bind is only
    *  unambiguous while exactly one device exists — if a second shows up we re-ask. */
   explicitPair: boolean;
+  /** The user asked to change device — show the picker even though we're paired. */
+  pickerOpen: boolean;
 }
 
 const INITIAL_STATE: UiState = {
@@ -160,12 +163,15 @@ const INITIAL_STATE: UiState = {
   deviceChoices: null,
   // ?device=<id> in the URL is an explicit choice made before we ever connect.
   explicitPair: getDeviceId() !== "",
+  pickerOpen: false,
 };
 
 type UiAction =
   | { type: "recv"; message: UiInboundMessage }
   | { type: "sent"; message: UiOutboundMessage }
   | { type: "device_selected"; explicit: boolean }
+  | { type: "open_picker" }
+  | { type: "close_picker" }
   | { type: "goal_submitted"; text: string }
   | { type: "understanding_sent"; goalId: string; confirmed: boolean }
   | { type: "decisions_sent"; decisions: ApprovalDecision[] }
@@ -328,9 +334,10 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
   switch (message.type) {
     case "hello_ack":
       // The cloud tells us which device agent it paired this socket with — from
-      // our `?device=`, its auto-bind (only one device online), or our pick.
+      // our `?device=`, its auto-bind (only one device online), or our pick. Keep
+      // deviceChoices: we need it for the paired device's NAME and the "change" picker.
       return message.device_id
-        ? { ...withGoal, boundDeviceId: message.device_id, deviceChoices: null }
+        ? { ...withGoal, boundDeviceId: message.device_id, pickerOpen: false }
         : withGoal;
 
     case "devices":
@@ -528,6 +535,12 @@ function reducer(state: UiState, action: UiAction): UiState {
       // the pairing. Auto-picking the only device on offer is still a guess, so it stays
       // re-askable if another device turns up.
       return action.explicit ? { ...state, explicitPair: true } : state;
+
+    case "open_picker":
+      return { ...state, pickerOpen: true };
+
+    case "close_picker":
+      return { ...state, pickerOpen: false };
 
     case "goal_submitted":
       // new goal resets the stage; rail lights "interpreting" immediately
@@ -794,7 +807,11 @@ export default function App() {
     !state.explicitPair &&
     (state.deviceChoices?.length ?? 0) > 1 &&
     stageIdle;
-  const awaitingDevicePick = unbound || ambiguousAutoPair;
+  // ...or the user asked to switch devices.
+  const awaitingDevicePick = unbound || ambiguousAutoPair || state.pickerOpen;
+  const pairedDevice = state.boundDeviceId
+    ? state.deviceChoices?.find((d) => d.device_id === state.boundDeviceId) ?? null
+    : null;
   const goalDisabled =
     connection !== "open" ||
     awaitingDevicePick ||
@@ -834,7 +851,17 @@ export default function App() {
       <main className={presenterMode ? "stage stage--with-feed" : "stage"}>
         <section className="stage__main">
           {awaitingDevicePick ? (
-            <DevicePicker devices={state.deviceChoices ?? []} onSelect={selectDevice} />
+            <DevicePicker
+              devices={state.deviceChoices ?? []}
+              currentDeviceId={state.boundDeviceId}
+              onSelect={selectDevice}
+              onCancel={state.boundDeviceId ? () => dispatch({ type: "close_picker" }) : undefined}
+            />
+          ) : state.boundDeviceId ? (
+            <PairedBar
+              name={pairedDevice?.device_name || state.boundDeviceId}
+              onChange={() => dispatch({ type: "open_picker" })}
+            />
           ) : null}
 
           <GoalComposer onSubmit={submitGoal} disabled={goalDisabled} />

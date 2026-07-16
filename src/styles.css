@@ -1384,3 +1384,54 @@ summary:focus-visible {
   font-size: 0.74rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+/* Paired-with bar + picker extras (see DevicePicker/PairedBar) */
+.paired-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--ink-dim);
+}
+
+.paired-bar__label {
+  color: var(--ink-faint);
+}
+
+.paired-bar__name {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.paired-bar__change,
+.device-picker__cancel {
+  padding: 0.2rem 0.55rem;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.paired-bar__change:hover,
+.device-picker__cancel:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.device-picker__cancel {
+  margin-top: 0.85rem;
+}
+
+.device-picker__option--current {
+  border-style: dashed;
+}
+
+.device-picker__current {
+  color: var(--ink-faint);
+  font-weight: 400;
+}
