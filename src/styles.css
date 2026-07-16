@@ -1316,3 +1316,71 @@ summary:focus-visible {
   border-radius: 8px;
   cursor: pointer;
 }
+
+/* --- Device picker -------------------------------------------------------
+   Shown only while this UI is UNBOUND (the cloud couldn't auto-pair us because
+   there isn't exactly one device agent online). Picking is a ONE-TIME action —
+   the choice is remembered per browser. */
+.device-picker {
+  padding: 1.1rem 1.25rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.025)),
+    var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 14px;
+}
+
+.device-picker__title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.02rem;
+  font-weight: 600;
+}
+
+.device-picker__hint {
+  margin: 0.3rem 0 0;
+  color: var(--ink-dim);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.device-picker__list {
+  list-style: none;
+  margin: 0.85rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.device-picker__option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  padding: 0.6rem 0.9rem;
+  color: var(--ink);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  cursor: pointer;
+  font: inherit;
+  transition: transform 120ms ease, background 120ms ease;
+}
+
+.device-picker__option:hover {
+  background: var(--accent-glow);
+  transform: translateY(-1px);
+}
+
+.device-picker__name {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.device-picker__id {
+  color: var(--ink-faint);
+  font-size: 0.74rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

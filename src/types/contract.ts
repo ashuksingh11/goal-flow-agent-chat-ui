@@ -505,6 +505,29 @@ export type ContractMessage =
   | Notice
   | Control;
 
+/** One connected device agent, offered to the UI for pairing. */
+export interface DeviceInfo {
+  device_id: string;
+  device_name: string;
+  online: boolean;
+}
+
+/**
+ * Cloud → UI: the device agents currently connected. Sent when this UI is
+ * UNBOUND (no `?device=` and the cloud couldn't auto-bind because there isn't
+ * exactly one device), and again whenever the set changes.
+ */
+export interface Devices {
+  type: "devices";
+  devices: DeviceInfo[];
+}
+
+/** UI → cloud: bind this socket to a device_id (from the picker). */
+export interface SelectDevice {
+  type: "select_device";
+  device_id: string;
+}
+
 /** Messages the UI can RECEIVE from the cloud. */
 export type UiInboundMessage =
   | HelloAck
@@ -514,7 +537,14 @@ export type UiInboundMessage =
   | PresentPlan
   | Proposal
   | Status
-  | Notice;
+  | Notice
+  | Devices;
 
 /** Messages the UI can SEND to the cloud. */
-export type UiOutboundMessage = Hello | UserGoal | UnderstandingResponse | Approval | Control;
+export type UiOutboundMessage =
+  | Hello
+  | UserGoal
+  | UnderstandingResponse
+  | Approval
+  | Control
+  | SelectDevice;

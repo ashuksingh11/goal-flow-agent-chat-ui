@@ -34,7 +34,8 @@ import { ProgressRail } from "./components/ProgressRail";
 import { Skeleton } from "./components/Skeleton";
 import { StatusTimeline } from "./components/StatusTimeline";
 import { UnderstandingCard } from "./components/UnderstandingCard";
-import { createGoalFlowSocket } from "./lib/ws";
+import { DevicePicker } from "./components/DevicePicker";
+import { createGoalFlowSocket, getRememberedDeviceId, rememberDeviceId } from "./lib/ws";
 import type { ConnectionState, GoalFlowSocket } from "./lib/ws";
 import type {
   AgentEvent,
@@ -43,6 +44,7 @@ import type {
   ControlCommand,
   ControlPayload,
   ImpactBadge,
+  DeviceInfo,
   PresentPlan,
   Proposal,
   Status,
@@ -116,6 +118,11 @@ interface UiState {
   /** Last applied agent_event seq (order/dedupe on reconnect). */
   lastSeq: number;
   nextId: number;
+  /** The device agent this UI is paired with (from hello_ack); null = unbound. */
+  boundDeviceId: string | null;
+  /** Live device agents to choose from. null = never offered (we're bound);
+   *  [] = offered but none online yet (wait for one to connect). */
+  deviceChoices: DeviceInfo[] | null;
 }
 
 const INITIAL_STATE: UiState = {
@@ -145,6 +152,8 @@ const INITIAL_STATE: UiState = {
   frames: [],
   lastSeq: 0,
   nextId: 1,
+  boundDeviceId: null,
+  deviceChoices: null,
 };
 
 type UiAction =
@@ -311,7 +320,16 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
 
   switch (message.type) {
     case "hello_ack":
-      return withGoal;
+      // The cloud tells us which device agent it paired this socket with — from
+      // our `?device=`, its auto-bind (only one device online), or our pick.
+      return message.device_id
+        ? { ...withGoal, boundDeviceId: message.device_id, deviceChoices: null }
+        : withGoal;
+
+    case "devices":
+      // Only sent while we're UNBOUND (0 or 2+ devices). The picker effect
+      // auto-picks the remembered/only one, or the user chooses.
+      return { ...withGoal, deviceChoices: message.devices };
 
     case "capabilities":
       return { ...withGoal, modules: message.modules };
@@ -653,6 +671,24 @@ export default function App() {
     };
   }, []);
 
+  const selectDevice = (deviceId: string) => {
+    rememberDeviceId(deviceId);
+    socketRef.current?.send({ type: "select_device", device_id: deviceId });
+    // The cloud replies hello_ack{device_id} — that's what marks us bound.
+  };
+
+  // Auto-pair while unbound: prefer the device this browser used last, else the
+  // only one on offer. Anything else needs a human pick (the picker renders).
+  useEffect(() => {
+    if (state.boundDeviceId || !state.deviceChoices?.length) return;
+    const remembered = getRememberedDeviceId();
+    const match = state.deviceChoices.find((d) => d.device_id === remembered);
+    const auto = match ?? (state.deviceChoices.length === 1 ? state.deviceChoices[0] : null);
+    if (auto) {
+      selectDevice(auto.device_id);
+    }
+  }, [state.boundDeviceId, state.deviceChoices]);
+
   const submitGoal = (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -717,8 +753,12 @@ export default function App() {
   };
 
   const planPending = state.working && !state.plan;
+  // Unbound = the cloud has no device to route our goal to yet; it would drop
+  // the frame, so block the composer until a device is picked.
+  const awaitingDevicePick = state.boundDeviceId === null && state.deviceChoices !== null;
   const goalDisabled =
     connection !== "open" ||
+    awaitingDevicePick ||
     state.working ||
     state.understanding !== null ||
     state.plan !== null;
@@ -754,6 +794,10 @@ export default function App() {
 
       <main className={presenterMode ? "stage stage--with-feed" : "stage"}>
         <section className="stage__main">
+          {awaitingDevicePick ? (
+            <DevicePicker devices={state.deviceChoices ?? []} onSelect={selectDevice} />
+          ) : null}
+
           <GoalComposer onSubmit={submitGoal} disabled={goalDisabled} />
 
           {latestNote && !state.activeGoalId && !state.working && !state.plan ? (

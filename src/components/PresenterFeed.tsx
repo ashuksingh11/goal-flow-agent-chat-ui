@@ -32,7 +32,11 @@ function describeFrame(frame: FlowFrame): string {
     case "hello":
       return "UI → cloud handshake";
     case "hello_ack":
-      return `session ${message.session_id}`;
+      return message.device_id ? `paired · ${message.device_id}` : `session ${message.session_id}`;
+    case "devices":
+      return `devices · ${message.devices.length} connected`;
+    case "select_device":
+      return `pair → ${message.device_id}`;
     case "capabilities":
       return `${message.modules.length} modules advertised`;
     case "user_goal":

@@ -34,6 +34,7 @@ const INBOUND_TYPES = new Set([
   "proposal",
   "status",
   "notice",
+  "devices",
 ]);
 
 export interface GoalFlowSocketOptions {
@@ -98,6 +99,31 @@ export function getDeviceId(search?: string): string {
     return new URLSearchParams(query).get("device")?.trim() ?? "";
   } catch {
     return "";
+  }
+}
+
+const REMEMBERED_DEVICE_KEY = "goalflow.device_id";
+
+/**
+ * The device this browser last paired with. Used to auto-pick out of the
+ * `devices` list so the picker is a ONE-TIME click per browser — never sent in
+ * `hello`, because a remembered device that is now OFFLINE would silently bind
+ * to a dead session. The list only contains live devices, so matching against it
+ * is self-healing.
+ */
+export function getRememberedDeviceId(): string {
+  try {
+    return window.localStorage?.getItem(REMEMBERED_DEVICE_KEY) ?? "";
+  } catch {
+    return ""; // storage disabled/unavailable — just show the picker
+  }
+}
+
+export function rememberDeviceId(deviceId: string): void {
+  try {
+    window.localStorage?.setItem(REMEMBERED_DEVICE_KEY, deviceId);
+  } catch {
+    // non-fatal: the pick still applies to this session
   }
 }
 
