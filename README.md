@@ -12,6 +12,11 @@ as discriminated unions in [`src/types/contract.ts`](src/types/contract.ts).
 
 ## What's on the stage (v2)
 
+- **Device pairing** — the cloud is multi-session (many UIs + many device agents at once,
+  paired by `device_id`). One device online ⇒ this UI auto-binds silently. Two or more
+  (e.g. two developers sharing one cloud) ⇒ a one-time `DevicePicker` before anything else
+  renders, remembered per browser (`localStorage`). `?device=<id>` in the URL overrides
+  pairing (scripted/CI runs). The goal composer is disabled until bound.
 - **Progress rail** — Interpreting → Grounding → Confirm → Planning → Checking → Approval →
   Monitoring, driven live by streamed `agent_event {event:"phase"}` frames (the active step
   pulses).
@@ -75,6 +80,11 @@ host that served the page (see Configuration). Open http://localhost:5173.
 
 `npm run build` runs `tsc -b && vite build` (type-checks the whole app).
 
+**Running two UIs against two device agents (multi-session):** one Vite server,
+two tabs — `http://localhost:5173/?device=hub-a` and `?device=hub-b` — each pairs
+with the matching device agent's `device_id`. Omit the query param and either UI
+falls back to auto-bind (one device online) or the `DevicePicker` (several).
+
 ## Running across machines (LAN — cloud + tablet)
 
 Typical deployment: the **cloud hub** and this **UI** run on one Ubuntu box, the
@@ -114,6 +124,7 @@ src/
   styles.css                # design tokens + all keyframes (CSS-only motion)
   components/
     ProgressRail.tsx        # seven-phase rail (incl. Confirm)
+    DevicePicker.tsx        # one-time device-agent picker (multi-session pairing)
     UnderstandingCard.tsx   # confirm-understanding gate (Confirm & plan / Decline)
     AgentStream.tsx         # thinking ticker + tool-call chips
     Skeleton.tsx            # shimmer placeholders (plan-item / line / chip)

@@ -30,6 +30,7 @@ src/
 
 ```
 App                        — socket + streaming state machine (one pure reducer) + stage
+├── DevicePicker            — one-time device-agent picker while unbound (multi-session pairing)
 ├── ProgressRail           — Interpreting → Grounding → Confirm → Planning → Checking → Approval → Monitoring
 ├── stage
 │   ├── GoalComposer       — input row (inline in App.tsx) + MicButton (STT stub)
@@ -51,12 +52,25 @@ in `ErrorBoundary` so one bad frame never blanks the app.
 ## The socket (`lib/ws.ts`)
 
 `createGoalFlowSocket()` opens ONE WebSocket to `VITE_WS_URL` (default
-`ws://localhost:8000/ws`), sends `hello {role:"ui"}` on open, and reconnects after 1.5 s on
-drop (re-sending `hello`). Inbound frames are JSON-parsed and validated against the set of
-UI-inbound `type`s (`hello_ack`, `capabilities`, `agent_event`, `understanding`, `present_plan`,
-`proposal`, `status`) — unknown frames are warned and dropped, never rendered. `onMessage` /
-`onSent` / `onStateChange` feed the App reducer, the presenter feed, and the header connection
-dot.
+`ws://localhost:8000/ws`), sends `hello {role:"ui", device_id}` on open (`device_id` from
+`getDeviceId()`, below), and reconnects after 1.5 s on drop (re-sending `hello`). Inbound
+frames are JSON-parsed and validated against the set of UI-inbound `type`s (`hello_ack`,
+`capabilities`, `agent_event`, `understanding`, `present_plan`, `proposal`, `status`,
+`notice`, `devices`) — unknown frames are warned and dropped, never rendered (this allowlist
+was the site of the old `notice`-frame bug: an un-whitelisted type is silently DROPPED, worth
+remembering when adding a new inbound frame). `onMessage` / `onSent` / `onStateChange` feed the
+App reducer, the presenter feed, and the header connection dot.
+
+**Device pairing (multi-session).** The cloud now serves many device agents and many UIs at
+once, paired by `device_id` (a "home" = 1 device + N UIs):
+
+- `getDeviceId(search?)` reads `?device=<id>` from the query string — per-tab and
+  platform-independent, so it works in the Tizen Hub's browser and a tablet alike. Empty when
+  absent, which tells the cloud to auto-bind or offer a picker.
+- `getRememberedDeviceId()` / `rememberDeviceId()` persist the user's picker choice in
+  `localStorage` (`goalflow.device_id`) — **deliberately not sent in `hello`**: a remembered
+  device that has since gone offline would silently bind the UI to a dead session. Instead
+  `App` matches it against the live `devices` list, so pairing self-heals when a device drops.
 
 ## The streaming state machine (`App.tsx`)
 
@@ -65,11 +79,14 @@ event→UI-state mapping lives there and nowhere else, so it's testable and the 
 stay dumb. `UiState` holds: `phase` (rail), `working`, `understanding`, `agentEntries` (thinking
 + chips), `draftItems`, `plan`, `proposalStatuses`, `adaptations`, `ticks`, `demoClock`,
 `eventChips` / `firedEventIds` / `firingEventId`, `planMorphs` / `morphSeq`, `frames`
-(presenter feed, capped at 120), and `lastSeq`.
+(presenter feed, capped at 120), `lastSeq`, `boundDeviceId` (from `hello_ack.device_id`;
+`null` while unbound), and `deviceChoices` (`DeviceInfo[] | null` from the `devices` frame;
+`null` = never offered ⇒ bound, `[]` = offered but no device online yet).
 
 | Inbound frame | Reducer effect | What the user sees |
 |---|---|---|
-| `hello_ack` | frame feed only | connection dot turns green |
+| `hello_ack` | `boundDeviceId` ← `device_id`, `deviceChoices` cleared; frame feed | connection dot turns green; `DevicePicker` (if shown) closes |
+| `devices` | `deviceChoices` ← `payload.devices` (only while unbound) | `DevicePicker` appears if `> 1` device or none online |
 | `capabilities` | store `modules` | (chips name real registry functions) |
 | `agent_event · phase` | `phase` ← payload | rail advances, active dot pulses |
 | `agent_event · thinking` | append/merge into the last thinking entry | reasoning line streams with a caret |
@@ -84,7 +101,10 @@ stay dumb. `UiState` holds: `phase` (rail), `working`, `understanding`, `agentEn
 Outbound `understanding_response {goal_id, payload:{confirmed}}` answers `sendUnderstanding()`.
 Outbound `control {command:"trigger_event", event_id}` (via `fireEvent()`) fires an event chip —
 gated on `state.approved` and a 30 s firing timeout (`event_timeout` action) in case the
-round-trip never lands.
+round-trip never lands. Outbound `select_device {device_id}` (via `selectDevice()`, called by
+`DevicePicker.onSelect` or by an effect that auto-picks the remembered/only device from
+`state.deviceChoices`) answers the pairing prompt — `rememberDeviceId()` runs first so the
+choice sticks, then the cloud's `hello_ack{device_id}` confirms the bind.
 
 Ordering/dedupe: `agent_event.seq` is monotonic per goal — `reduceAgentEvent` drops
 `seq <= lastSeq` (late/duplicate frames after a reconnect). Consecutive `thinking` fragments
@@ -96,13 +116,29 @@ lights "Interpreting" until the device's own phase events take over. Sending dec
 (`decisions_sent`) marks those proposals `pending` optimistically — they flip to `done` only
 when a later `status.payload.executed[]` entry confirms them.
 
-Stage layout logic (in `App`'s render): `UnderstandingCard` shows whenever `state.understanding`
+Stage layout logic (in `App`'s render): `awaitingDevicePick = boundDeviceId === null &&
+deviceChoices !== null` renders `DevicePicker` ahead of everything else and disables the goal
+composer — the cloud drops frames from an unbound UI, so nothing useful can happen yet.
+`UnderstandingCard` shows whenever `state.understanding`
 is set, ahead of everything else, and blocks the goal composer; `AgentStream` shows while there's
 no understanding gate or plan and the agent is working; `planPending = working && !plan` shows
 draft rows + `Skeleton` (count shrinks as drafts arrive: `max(1, 4 - drafts)`); `PlanCard`
 replaces both once `present_plan` lands. Below the stage: `EventStrip` renders when the plan
 carries `demo_events` (`hasEventStrip`), otherwise `DemoControls` renders once a plan exists
 (`hasDemoControls`) — the two are mutually exclusive per plan.
+
+## Device pairing (`DevicePicker`)
+
+Renders while `awaitingDevicePick` (see Stage layout logic above): a "Waiting for a device
+agent…" message if `state.deviceChoices` is empty, else a list of `DeviceInfo {device_id,
+device_name}` buttons ("Which device agent is yours?"). Clicking one calls `onSelect(device_id)`
+→ `App.selectDevice`, which persists the pick (`rememberDeviceId`) and sends
+`select_device {device_id}`; the picker disappears once `hello_ack.device_id` confirms the bind.
+An effect in `App` skips the picker automatically when `state.deviceChoices` has exactly one
+entry, or contains the browser's remembered `device_id` (`getRememberedDeviceId()`) — so this
+UI only asks a human once per browser, and only when genuinely ambiguous (2+ devices online,
+none remembered). `?device=<id>` in the URL bypasses pairing entirely (the value goes straight
+into `hello`, so the cloud binds on connect and neither `devices` nor the picker ever appear).
 
 ## The confirm-understanding gate (`UnderstandingCard`)
 
