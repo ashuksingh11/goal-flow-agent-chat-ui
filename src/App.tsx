@@ -35,7 +35,7 @@ import { Skeleton } from "./components/Skeleton";
 import { StatusTimeline } from "./components/StatusTimeline";
 import { UnderstandingCard } from "./components/UnderstandingCard";
 import { DevicePicker } from "./components/DevicePicker";
-import { createGoalFlowSocket, getRememberedDeviceId, rememberDeviceId } from "./lib/ws";
+import { createGoalFlowSocket, getDeviceId, getRememberedDeviceId, rememberDeviceId } from "./lib/ws";
 import type { ConnectionState, GoalFlowSocket } from "./lib/ws";
 import type {
   AgentEvent,
@@ -120,9 +120,13 @@ interface UiState {
   nextId: number;
   /** The device agent this UI is paired with (from hello_ack); null = unbound. */
   boundDeviceId: string | null;
-  /** Live device agents to choose from. null = never offered (we're bound);
-   *  [] = offered but none online yet (wait for one to connect). */
+  /** Live device agents to choose from. null = not offered yet;
+   *  [] = offered but none online (wait for one to connect). */
   deviceChoices: DeviceInfo[] | null;
+  /** True once the pairing is a real CHOICE (?device=, or a picker/remembered
+   *  selection) rather than the cloud's auto-bind guess. An auto-bind is only
+   *  unambiguous while exactly one device exists — if a second shows up we re-ask. */
+  explicitPair: boolean;
 }
 
 const INITIAL_STATE: UiState = {
@@ -154,11 +158,14 @@ const INITIAL_STATE: UiState = {
   nextId: 1,
   boundDeviceId: null,
   deviceChoices: null,
+  // ?device=<id> in the URL is an explicit choice made before we ever connect.
+  explicitPair: getDeviceId() !== "",
 };
 
 type UiAction =
   | { type: "recv"; message: UiInboundMessage }
   | { type: "sent"; message: UiOutboundMessage }
+  | { type: "device_selected"; explicit: boolean }
   | { type: "goal_submitted"; text: string }
   | { type: "understanding_sent"; goalId: string; confirmed: boolean }
   | { type: "decisions_sent"; decisions: ApprovalDecision[] }
@@ -327,8 +334,9 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         : withGoal;
 
     case "devices":
-      // Only sent while we're UNBOUND (0 or 2+ devices). The picker effect
-      // auto-picks the remembered/only one, or the user chooses.
+      // Sent to every ui whenever the connected set changes. While unbound this
+      // drives the picker; while AUTO-bound it's how we learn a second device
+      // appeared and our guess is no longer unambiguous.
       return { ...withGoal, deviceChoices: message.devices };
 
     case "capabilities":
@@ -515,6 +523,12 @@ function reducer(state: UiState, action: UiAction): UiState {
     case "sent":
       return pushFrame(state, "sent", action.message);
 
+    case "device_selected":
+      // Only a real CHOICE (the picker, or the device this browser remembered) settles
+      // the pairing. Auto-picking the only device on offer is still a guess, so it stays
+      // re-askable if another device turns up.
+      return action.explicit ? { ...state, explicitPair: true } : state;
+
     case "goal_submitted":
       // new goal resets the stage; rail lights "interpreting" immediately
       // (the device's own phase events take over as they stream in)
@@ -671,23 +685,37 @@ export default function App() {
     };
   }, []);
 
-  const selectDevice = (deviceId: string) => {
-    rememberDeviceId(deviceId);
+  const selectDevice = (deviceId: string, explicit = true) => {
+    if (explicit) {
+      rememberDeviceId(deviceId); // only a real choice is worth remembering
+    }
+    dispatch({ type: "device_selected", explicit });
     socketRef.current?.send({ type: "select_device", device_id: deviceId });
     // The cloud replies hello_ack{device_id} — that's what marks us bound.
   };
 
-  // Auto-pair while unbound: prefer the device this browser used last, else the
-  // only one on offer. Anything else needs a human pick (the picker renders).
+  // Settle the pairing without bothering anyone when it's unambiguous:
+  //  - the device this browser last chose, if it's online → a CHOICE, settles it;
+  //  - else, while unbound, the only device on offer      → a guess, stays re-askable.
+  // Anything else renders the picker.
   useEffect(() => {
-    if (state.boundDeviceId || !state.deviceChoices?.length) return;
+    if (!state.deviceChoices?.length) return;
+    if (state.boundDeviceId && state.explicitPair) return; // already settled
+
     const remembered = getRememberedDeviceId();
     const match = state.deviceChoices.find((d) => d.device_id === remembered);
-    const auto = match ?? (state.deviceChoices.length === 1 ? state.deviceChoices[0] : null);
-    if (auto) {
-      selectDevice(auto.device_id);
+    if (match) {
+      if (match.device_id === state.boundDeviceId) {
+        dispatch({ type: "device_selected", explicit: true }); // already on it — just settle
+      } else {
+        selectDevice(match.device_id, true);
+      }
+      return;
     }
-  }, [state.boundDeviceId, state.deviceChoices]);
+    if (!state.boundDeviceId && state.deviceChoices.length === 1) {
+      selectDevice(state.deviceChoices[0].device_id, false);
+    }
+  }, [state.boundDeviceId, state.deviceChoices, state.explicitPair]);
 
   const submitGoal = (text: string) => {
     const trimmed = text.trim();
@@ -755,7 +783,18 @@ export default function App() {
   const planPending = state.working && !state.plan;
   // Unbound = the cloud has no device to route our goal to yet; it would drop
   // the frame, so block the composer until a device is picked.
-  const awaitingDevicePick = state.boundDeviceId === null && state.deviceChoices !== null;
+  const unbound = state.boundDeviceId === null && state.deviceChoices !== null;
+  // An AUTO-bind (no ?device=, cloud saw exactly one device) was a guess. If a second
+  // device has since connected the guess is ambiguous — ask, rather than silently
+  // leaving this tab on whichever agent happened to be up first. Only while idle: never
+  // interrupt a running goal.
+  const stageIdle = !state.working && state.plan === null && state.understanding === null;
+  const ambiguousAutoPair =
+    state.boundDeviceId !== null &&
+    !state.explicitPair &&
+    (state.deviceChoices?.length ?? 0) > 1 &&
+    stageIdle;
+  const awaitingDevicePick = unbound || ambiguousAutoPair;
   const goalDisabled =
     connection !== "open" ||
     awaitingDevicePick ||
