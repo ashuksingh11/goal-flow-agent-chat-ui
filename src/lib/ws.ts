@@ -115,6 +115,24 @@ export function getDeviceId(search?: string): string {
   }
 }
 
+/**
+ * A goal to rejoin, from `?goal=<id>` — how the Agent Board drills in.
+ *
+ * The board is read-mostly by design: it shows every goal at a glance and hands off
+ * to this UI for anything that needs a person (confirming an understanding,
+ * approving a proposal). That handoff is a plain link, so the two apps stay
+ * independently deployable and this one needs no board-specific frame — it just asks
+ * the hub for the goal's current state via `goal_state_get`.
+ */
+export function getGoalId(search?: string): string {
+  const query = search ?? (typeof window !== "undefined" ? window.location?.search : "") ?? "";
+  try {
+    return new URLSearchParams(query).get("goal")?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
 const REMEMBERED_DEVICE_KEY = "goalflow.device_id";
 
 /**
