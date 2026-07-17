@@ -529,6 +529,13 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
       }
       return next;
     }
+    default:
+      // A frame the allowlist passes but this switch doesn't map. Every case is
+      // covered today, so this never fires — but without it an unhandled type makes
+      // reduceInbound return undefined, and the NEXT frame crashes reading
+      // `state.nextId` on it. A reducer must always return a state; carry the goal
+      // update and drop the frame rather than poison the store.
+      return withGoal;
   }
 }
 
