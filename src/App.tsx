@@ -36,7 +36,7 @@ import { StatusTimeline } from "./components/StatusTimeline";
 import { UnderstandingCard } from "./components/UnderstandingCard";
 import { DevicePicker } from "./components/DevicePicker";
 import { PairedBar } from "./components/PairedBar";
-import { createGoalFlowSocket, getDeviceId, getRememberedDeviceId, rememberDeviceId } from "./lib/ws";
+import { createGoalFlowSocket, getDeviceId, getGoalId, getRememberedDeviceId, rememberDeviceId } from "./lib/ws";
 import type { ConnectionState, GoalFlowSocket } from "./lib/ws";
 import type {
   AgentEvent,
@@ -348,6 +348,16 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
 
     case "capabilities":
       return { ...withGoal, modules: message.modules };
+
+    // v3 board frames. The cloud broadcasts to EVERY ui bound to a session, so this
+    // surface receives them even though Agent Board is its own app. Ignored HERE
+    // ON PURPOSE — but listed, so the compiler forces a decision instead of letting
+    // a frame vanish into a default case. (This surface is one goal at a time; it
+    // adopts its goal_id from `understanding`, so goal_accepted tells it nothing new.)
+    case "board_snapshot":
+    case "board_update":
+    case "goal_accepted":
+      return withGoal;
 
     case "agent_event":
       return reduceAgentEvent(withGoal, message);
@@ -729,6 +739,19 @@ export default function App() {
       selectDevice(state.deviceChoices[0].device_id, false);
     }
   }, [state.boundDeviceId, state.deviceChoices, state.explicitPair]);
+
+  // Drill-in from the Agent Board: `?goal=<id>` means "show me this one". Ask only
+  // once we're BOUND — the hub answers into a device session, so a request sent
+  // before pairing would be answered into nowhere. Once per load: this rejoins a
+  // goal, it doesn't poll one.
+  const rejoinedGoalRef = useRef(false);
+  useEffect(() => {
+    if (rejoinedGoalRef.current || !state.boundDeviceId) return;
+    const goalId = getGoalId();
+    if (!goalId) return;
+    rejoinedGoalRef.current = true;
+    socketRef.current?.send({ type: "goal_state_get", goal_id: goalId });
+  }, [state.boundDeviceId]);
 
   const submitGoal = (text: string) => {
     const trimmed = text.trim();

@@ -25,6 +25,11 @@ import type { UiInboundMessage, UiOutboundMessage } from "../types/contract";
 
 export type ConnectionState = "connecting" | "open" | "closed";
 
+// THE ALLOWLIST IS A SILENT DROPPER: an unlisted frame is discarded with only a
+// console warning, so a contract addition that misses this line fails at runtime and
+// looks like nothing happened. (That is not hypothetical — the same class of gap in
+// the Python mirror swallowed every task_update and left the board at 0%.)
+// `verify_mirrors.py` in the cloud repo checks this list against CONTRACT.md.
 const INBOUND_TYPES = new Set([
   "hello_ack",
   "capabilities",
@@ -35,6 +40,14 @@ const INBOUND_TYPES = new Set([
   "status",
   "notice",
   "devices",
+  // v3: the cloud broadcasts to EVERY ui bound to a session, so this surface also
+  // receives the board's frames. It ignores them (Agent Board is its own app) — but
+  // they are listed so they are ignored DELIBERATELY rather than dropped as unknown.
+  "board_snapshot",
+  "board_update",
+  // v3: ties a submission to its goal_id. This UI runs one goal at a time and adopts
+  // the id from `understanding`, so it is informational here — the board needs it.
+  "goal_accepted",
 ]);
 
 export interface GoalFlowSocketOptions {
@@ -97,6 +110,24 @@ export function getDeviceId(search?: string): string {
   const query = search ?? (typeof window !== "undefined" ? window.location?.search : "") ?? "";
   try {
     return new URLSearchParams(query).get("device")?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * A goal to rejoin, from `?goal=<id>` — how the Agent Board drills in.
+ *
+ * The board is read-mostly by design: it shows every goal at a glance and hands off
+ * to this UI for anything that needs a person (confirming an understanding,
+ * approving a proposal). That handoff is a plain link, so the two apps stay
+ * independently deployable and this one needs no board-specific frame — it just asks
+ * the hub for the goal's current state via `goal_state_get`.
+ */
+export function getGoalId(search?: string): string {
+  const query = search ?? (typeof window !== "undefined" ? window.location?.search : "") ?? "";
+  try {
+    return new URLSearchParams(query).get("goal")?.trim() ?? "";
   } catch {
     return "";
   }

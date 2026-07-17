@@ -59,6 +59,20 @@ function describeFrame(frame: FlowFrame): string {
       return `${message.task_status}${message.payload.material ? " · material" : ""}`;
     case "notice":
       return `notice · ${message.kind}`;
+    // v3 board frames. The cloud broadcasts to EVERY ui bound to a session, so this
+    // surface sees them even though Agent Board is its own app. Shown rather than
+    // hidden: this is a debug view OF THE WIRE, and hiding real traffic from it
+    // would defeat the point.
+    case "board_snapshot":
+      return `board · ${message.goals.length} goal(s) · seq ${message.board_seq}`;
+    case "board_update":
+      return `board · ${message.goal.title} · ${message.goal.state} ${message.goal.progress_pct}%`;
+    case "board_get":
+      return "board refresh → cloud";
+    case "goal_state_get":
+      return `rehydrate ${message.goal_id.slice(0, 8)} → cloud`;
+    case "goal_accepted":
+      return `goal accepted · ${message.client_ref ?? message.goal_id.slice(0, 8)}`;
   }
 }
 
