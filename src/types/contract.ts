@@ -106,6 +106,14 @@ export interface Capabilities {
 export interface UserGoal {
   type: "user_goal";
   text: string;
+  /**
+   * UI-minted id, echoed back in `goal_accepted` (v3).
+   *
+   * With two goals in flight the UI cannot tell which inbound goal_id belongs to
+   * which submission. Optional — this surface runs one goal at a time and doesn't
+   * need it; the board does.
+   */
+  client_ref?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -538,10 +546,86 @@ export type UiInboundMessage =
   | Proposal
   | Status
   | Notice
-  | Devices;
+  | Devices
+  | BoardSnapshot
+  | BoardUpdate
+  | GoalAccepted;
+
+// ---------------------------------------------------------------------------
+// Agent Board (v3) — mirrored here because the cloud broadcasts to every ui in a
+// session, so this surface receives them even though Agent Board is its own app.
+// ---------------------------------------------------------------------------
+
+/** Things wanting attention on a goal. */
+export interface GoalAlerts {
+  count: number;
+  /** "danger" | "warn" | null — null when count is 0. */
+  severity: string | null;
+}
+
+/**
+ * One goal, as Agent Board renders it.
+ *
+ * DERIVED BY THE CLOUD from frames it already routes. Every number traces to
+ * something the device said: progress/next_step/pending come from its task DAG via
+ * `task_update`, eta from the contract's own time window.
+ */
+export interface GoalSummary {
+  goal_id: string;
+  client_ref?: string | null;
+  title: string;
+  subtitle: string;
+  domain: string;
+  /** The board's four chips. */
+  state: "on_track" | "at_risk" | "waiting" | "completed";
+  task_status: TaskStatus;
+  progress_pct: number;
+  next_step: string | null;
+  /** ISO date the goal aims at; the UI renders "2 days" by diffing. */
+  eta: string | null;
+  pending_tasks: number;
+  alerts: GoalAlerts;
+  activity: string[];
+  updated_at: string;
+}
+
+/** Every goal in the session — on bind, and in reply to `board_get`. */
+export interface BoardSnapshot {
+  type: "board_snapshot";
+  /** Monotonic per session; a gap means a lost update — send `board_get` to heal. */
+  board_seq: number;
+  goals: GoalSummary[];
+}
+
+/** One goal changed: a WHOLE summary, replace-by-goal_id (idempotent). */
+export interface BoardUpdate {
+  type: "board_update";
+  board_seq: number;
+  goal: GoalSummary;
+}
+
+/** UI asks for a fresh snapshot (first paint, or healing a board_seq gap). */
+export interface BoardGet {
+  type: "board_get";
+}
+
+/** UI asks for one goal's cached plan + latest status (drill-in after a reload). */
+export interface GoalStateGet {
+  type: "goal_state_get";
+  goal_id: string;
+}
+
+/** Ties a submission to its goal_id, so an optimistic card can re-key. */
+export interface GoalAccepted {
+  type: "goal_accepted";
+  goal_id: string;
+  client_ref?: string | null;
+}
 
 /** Messages the UI can SEND to the cloud. */
 export type UiOutboundMessage =
+  | BoardGet
+  | GoalStateGet
   | Hello
   | UserGoal
   | UnderstandingResponse

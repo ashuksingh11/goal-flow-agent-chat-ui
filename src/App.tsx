@@ -349,6 +349,16 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
     case "capabilities":
       return { ...withGoal, modules: message.modules };
 
+    // v3 board frames. The cloud broadcasts to EVERY ui bound to a session, so this
+    // surface receives them even though Agent Board is its own app. Ignored HERE
+    // ON PURPOSE — but listed, so the compiler forces a decision instead of letting
+    // a frame vanish into a default case. (This surface is one goal at a time; it
+    // adopts its goal_id from `understanding`, so goal_accepted tells it nothing new.)
+    case "board_snapshot":
+    case "board_update":
+    case "goal_accepted":
+      return withGoal;
+
     case "agent_event":
       return reduceAgentEvent(withGoal, message);
 
