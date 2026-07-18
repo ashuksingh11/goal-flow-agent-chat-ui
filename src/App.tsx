@@ -1,32 +1,34 @@
 /**
  * App — root: owns the socket, the STREAMING STATE MACHINE, and the stage.
  *
- * v2 component tree (docs/ARCHITECTURE.md is the spec):
+ * v3.1: the chat UI is the goal-CREATION surface. It owns goal entry, the
+ * understanding gate, and the INITIAL tiered plan approval — then hands off. Once the
+ * plan is approved it shows a hand-off banner and the goal's LIFE (monitoring, the
+ * world-event simulation controls, and world-event adaptation approvals) moves to the
+ * Agent Board. So EventStrip / DemoControls / AdaptationCard were removed from here and
+ * live on the board now.
+ *
+ * Component tree:
  *   App
  *   ├── ProgressRail      — phase rail (agent_event:phase + task_status)
  *   ├── stage
  *   │   ├── GoalComposer  — input + MicButton (inline below)
  *   │   ├── AgentStream   — thinking stream + tool-call chips (live)
  *   │   ├── Skeleton      — plan silhouette while planning (no plan yet)
- *   │   ├── PlanCard      — the plan hero (generic) + ProposalList (tiers)
- *   │   ├── AdaptationCard— "caught a change" (proposal frames)
+ *   │   ├── PlanCard      — the plan hero (generic) + ProposalList (initial approval)
  *   │   └── StatusTimeline— quiet sustain ticks (monitoring)
- *   ├── DemoControls      — sim clock (generic dates + the v1 day-fix)
+ *   ├── UnderstandingCard — the pre-planning confirm gate
+ *   ├── handoff banner    — "Plan approved — continue on your Board" (v3.1)
  *   └── PresenterFeed     — raw WS frames ("Show agent flow" toggle)
  *
  * All inbound frames flow through ONE pure reducer (reduceInbound) — the
- * streaming-event → UI-state mapping lives there and nowhere else.
- *
- * Fully implemented: state machine, composition, and visuals, including the
- * confirm-understanding gate (UnderstandingCard) and the event-driven meal
- * week (EventStrip).
+ * streaming-event → UI-state mapping lives there and nowhere else. The reducer still
+ * folds proposal/status frames (a UI that stays open past approval keeps its plan in
+ * sync), but no longer renders adaptations — the board does.
  */
 
 import { useEffect, useReducer, useRef, useState } from "react";
-import { AdaptationCard } from "./components/AdaptationCard";
 import { AgentStream } from "./components/AgentStream";
-import { DemoControls } from "./components/DemoControls";
-import { EventStrip } from "./components/EventStrip";
 import { MicButton } from "./components/MicButton";
 import { PlanCard } from "./components/PlanCard";
 import { PresenterFeed } from "./components/PresenterFeed";
@@ -42,8 +44,6 @@ import type {
   AgentEvent,
   ApprovalDecision,
   CapabilityModule,
-  ControlCommand,
-  ControlPayload,
   ImpactBadge,
   DeviceInfo,
   PresentPlan,
@@ -805,37 +805,6 @@ export default function App() {
     });
   };
 
-  const sendControl = (command: ControlCommand, payload?: ControlPayload) => {
-    if (!state.activeGoalId) return;
-    socketRef.current?.send({
-      type: "control",
-      goal_id: state.activeGoalId,
-      command,
-      event_id: payload?.event_id,
-      payload: payload ?? {},
-    });
-  };
-
-  useEffect(() => {
-    if (!state.firingEventId) return;
-    const eventId = state.firingEventId;
-    const timeout = window.setTimeout(() => {
-      dispatch({ type: "event_timeout", eventId });
-    }, 30000);
-    return () => window.clearTimeout(timeout);
-  }, [state.firingEventId]);
-
-  const fireEvent = (eventId: string) => {
-    if (!state.approved || state.firingEventId || state.firedEventIds.includes(eventId)) return;
-    dispatch({ type: "event_fired", eventId });
-    sendControl("trigger_event", { event_id: eventId });
-  };
-
-  const resetWeek = () => {
-    sendControl("reset");
-    dispatch({ type: "demo_reset" });
-  };
-
   const planPending = state.working && !state.plan;
   // Unbound = the cloud has no device to route our goal to yet; it would drop
   // the frame, so block the composer until a device is picked.
@@ -861,9 +830,6 @@ export default function App() {
     state.working ||
     state.understanding !== null ||
     state.plan !== null;
-  const demoEventCount = state.plan?.payload.demo_events?.length ?? 0;
-  const hasEventStrip = demoEventCount > 0;
-  const hasDemoControls = state.plan !== null && demoEventCount === 0;
   const latestNote = [...state.transcript].reverse().find((entry) => entry.kind === "note");
 
   return (
@@ -963,36 +929,21 @@ export default function App() {
             />
           ) : null}
 
-          {state.adaptations.map((adaptation) => (
-            <AdaptationCard
-              key={adaptation.payload.proposal_id}
-              proposal={adaptation}
-              status={state.proposalStatuses[adaptation.payload.proposal_id]}
-              onDecide={(approved) =>
-                sendDecisions(adaptation.goal_id, adaptation.correlation_id, [
-                  { proposal_id: adaptation.payload.proposal_id, approved },
-                ])
-              }
-            />
-          ))}
-
           {state.ticks.length > 0 ? <StatusTimeline ticks={state.ticks} /> : null}
         </section>
 
         {presenterMode ? <PresenterFeed frames={state.frames} /> : null}
       </main>
 
-      {hasEventStrip && state.plan ? (
-        <EventStrip
-          events={state.plan.payload.demo_events ?? []}
-          enabled={state.approved}
-          firedIds={state.firedEventIds}
-          firingId={state.firingEventId}
-          onFire={fireEvent}
-          onReset={resetWeek}
-        />
-      ) : hasDemoControls ? (
-        <DemoControls clock={state.demoClock} onCommand={sendControl} />
+      {state.approved ? (
+        <div className="handoff" role="status">
+          <span className="handoff__mark" aria-hidden="true">✓</span>
+          <div className="handoff__body">
+            <strong>Plan approved.</strong>{" "}
+            Your Agent Board is now driving this goal — it tracks progress, simulates
+            world events, and will ask you there if anything needs to change.
+          </div>
+        </div>
       ) : null}
     </div>
   );
