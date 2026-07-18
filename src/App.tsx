@@ -271,6 +271,14 @@ function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
           },
         ],
       };
+    default:
+      // An agent_event kind this UI doesn't render — notably `task_update`, which
+      // the device streams heavily (it drives Agent Board's progress, not this feed).
+      // Without this the switch returns undefined and the NEXT event crashes reading
+      // `state.lastSeq` on it → the ErrorBoundary's "cannot render". Advance lastSeq
+      // (via `next`) and drop the frame. Same fix as reduceInbound's default; this is
+      // the inner reducer, which was missed.
+      return next;
   }
 }
 
@@ -688,6 +696,11 @@ function reducer(state: UiState, action: UiAction): UiState {
         working: false,
         phase: state.pristinePlan ? "awaiting_approval" : state.phase,
       };
+    default:
+      // Actions are an internal closed union, so this is unreachable today — but a
+      // reducer must always return a state, and "switch falls through to undefined"
+      // has bitten this file three times (reduceInbound, reduceAgentEvent, here).
+      return state;
   }
 }
 

@@ -208,13 +208,27 @@ export interface AgentPlanProgressEvent extends AgentEventBase {
   payload: { item: Partial<PlanItem> & Pick<PlanItem, "title"> };
 }
 
+/**
+ * A task in the device's DAG changed state (M6). This UI does NOT render it — it
+ * drives Agent Board's progress, not this "watch it think" feed — but the device
+ * streams it heavily during planning, so the type must MODEL it: leaving it out made
+ * the reducer's `event` switch look exhaustive over five kinds while a sixth arrived
+ * at runtime and fell through to `undefined`. Typed loosely, handled by the reducer's
+ * `default`.
+ */
+export interface AgentTaskUpdateEvent extends AgentEventBase {
+  event: "task_update";
+  payload: Record<string, unknown>;
+}
+
 /** Discriminate on `event` (after narrowing `type === "agent_event"`). */
 export type AgentEvent =
   | AgentPhaseEvent
   | AgentThinkingEvent
   | AgentToolCallEvent
   | AgentToolResultEvent
-  | AgentPlanProgressEvent;
+  | AgentPlanProgressEvent
+  | AgentTaskUpdateEvent;
 
 export type AgentEventKind = AgentEvent["event"];
 
