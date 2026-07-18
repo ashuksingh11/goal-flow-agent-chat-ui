@@ -499,7 +499,9 @@ export interface ControlPayload {
 
 export interface Control {
   type: "control";
-  goal_id: string;
+  /** OPTIONAL (v3.2): omitted/empty = a WORLD-level clock tick (the board's Advance day).
+   *  The chat UI no longer sends control at all — kept for mirror fidelity. */
+  goal_id?: string;
   command: ControlCommand;
   event_id?: string;
   payload: ControlPayload;
