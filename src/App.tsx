@@ -196,6 +196,12 @@ function pushFrame(state: UiState, direction: FlowFrame["direction"], message: F
   };
 }
 
+/** A thinking fragment that is actually raw JSON (a leaked plan blob), not prose. */
+function looksLikeJson(text: string): boolean {
+  const trimmed = text.trimStart();
+  return trimmed.startsWith("{") || trimmed.startsWith("[");
+}
+
 /** agent_event → live stream entries (the "watch it think" reduction). */
 function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
   if (event.seq <= state.lastSeq) {
@@ -215,10 +221,18 @@ function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
 
     case "thinking": {
       const last = next.agentEntries[next.agentEntries.length - 1];
+      const merged = last?.kind === "thinking" ? last.text + event.payload.text : event.payload.text;
+      // The plan-compose path can emit ONE `thinking` frame carrying the raw plan
+      // JSON (being removed device-side — defended against here too). Never render
+      // JSON as a "thought": drop the frame when the fragment, or the buffer it would
+      // extend, looks like a JSON object/array. Genuine grounding narration is prose
+      // and still accumulates as before.
+      if (looksLikeJson(event.payload.text) || looksLikeJson(merged)) {
+        return next;
+      }
       if (last?.kind === "thinking") {
         // consecutive fragments accumulate into one streaming line
-        const merged = { ...last, text: last.text + event.payload.text };
-        return { ...next, agentEntries: [...next.agentEntries.slice(0, -1), merged] };
+        return { ...next, agentEntries: [...next.agentEntries.slice(0, -1), { ...last, text: merged }] };
       }
       return {
         ...next,
@@ -331,6 +345,20 @@ function isPlanApproved(plan: PresentPlan | null, statuses: ProposalStatusMap): 
   return approvalRequired.every(
     (proposal) => statuses[proposal.proposal_id]?.approved === true,
   );
+}
+
+/**
+ * Is the device this UI is bound to actually ONLINE?
+ *
+ * The cloud's `devices` list contains ONLY currently-connected agents (offline ones
+ * are omitted entirely — never sent with online:false), so presence in the list IS
+ * "online". Returns true when we have no binding yet or no list yet (nothing to heal):
+ * "offline" is a claim we can only make once a `devices` frame has arrived and our
+ * bound id is missing from it.
+ */
+function boundDeviceOnline(boundId: string | null, choices: DeviceInfo[] | null): boolean {
+  if (!boundId || choices === null) return true;
+  return choices.some((device) => device.device_id === boundId);
 }
 
 /** The single inbound-frame → UI-state mapping (see ARCHITECTURE.md table). */
@@ -795,6 +823,28 @@ export default function App() {
   // Anything else renders the picker.
   useEffect(() => {
     if (!state.deviceChoices?.length) return;
+
+    // SELF-HEAL an offline binding. We are bound to a device the (online-only)
+    // `devices` list no longer contains — e.g. the device restarted under a fresh
+    // auto-generated id, so our stale id silently binds to an empty session that
+    // declines every goal. When EXACTLY ONE device is online, auto-rebind to it
+    // (demo has one device — it should just work), even when the pairing was
+    // explicit (?device=). 0 or 2+ online → leave it to the picker / reconnecting
+    // note. Runs BEFORE the explicitPair early-return so an explicit-but-dead
+    // binding still heals. The `only !== bound` guard never re-sends for the id we
+    // are already on (and a bound id that is offline is by definition NOT `only`,
+    // which is online), so this cannot loop.
+    if (state.boundDeviceId && !boundDeviceOnline(state.boundDeviceId, state.deviceChoices)) {
+      if (state.deviceChoices.length === 1) {
+        const only = state.deviceChoices[0].device_id;
+        if (only !== state.boundDeviceId) {
+          rememberDeviceId(only);
+          selectDevice(only, false);
+        }
+      }
+      return;
+    }
+
     if (state.boundDeviceId && state.explicitPair) return; // already settled
 
     const remembered = getRememberedDeviceId();
@@ -891,8 +941,18 @@ export default function App() {
     !state.explicitPair &&
     (state.deviceChoices?.length ?? 0) > 1 &&
     stageIdle;
+  // Bound to a device that is NOT in the (online-only) `devices` list → the paired
+  // device agent is offline. Without this the UI stays "paired" to a dead session and
+  // silently declines every goal, never offering the picker (boundDeviceId is truthy).
+  // The settle effect above auto-rebinds when exactly one device is online; otherwise
+  // we surface the picker (2+) or a reconnecting note (0).
+  const boundOffline = !boundDeviceOnline(state.boundDeviceId, state.deviceChoices);
+  // While an offline binding is self-healing (exactly one device online) or simply
+  // waiting for a device to reappear (0 online), show a reassuring note rather than a
+  // picker. A real CHOICE is only needed when 2+ devices are online.
+  const boundOfflineReconnecting = boundOffline && (state.deviceChoices?.length ?? 0) < 2;
   // ...or the user asked to switch devices.
-  const awaitingDevicePick = unbound || ambiguousAutoPair || state.pickerOpen;
+  const awaitingDevicePick = unbound || ambiguousAutoPair || boundOffline || state.pickerOpen;
   const pairedDevice = state.boundDeviceId
     ? state.deviceChoices?.find((d) => d.device_id === state.boundDeviceId) ?? null
     : null;
@@ -925,7 +985,11 @@ export default function App() {
 
       <main className={presenterMode ? "stage stage--with-feed" : "stage"}>
         <section className="stage__main">
-          {awaitingDevicePick ? (
+          {boundOfflineReconnecting ? (
+            <p className="device-offline-note" role="status" aria-live="polite">
+              Paired device offline — reconnecting…
+            </p>
+          ) : awaitingDevicePick ? (
             <DevicePicker
               devices={state.deviceChoices ?? []}
               currentDeviceId={state.boundDeviceId}

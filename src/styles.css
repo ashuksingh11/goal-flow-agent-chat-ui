@@ -480,6 +480,20 @@ summary:focus-visible {
   font-size: 0.85rem;
   line-height: 1.4;
 }
+/* Live one-line "thought" beneath the status: grounding narration as it streams,
+   or the rotating planning reassurance while the compose call runs. */
+.agent-status__thought {
+  width: 100%;
+  margin: -0.1rem 0 0 1.95rem;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.agent-status__thought--planning {
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
 .tool-chip-row {
   display: flex;
   flex-wrap: wrap;
@@ -1429,6 +1443,27 @@ summary:focus-visible {
 
 .device-picker__option--current {
   border-style: dashed;
+}
+
+/* Shown while a bound-but-offline device self-heals (one device online) or waits
+   for one to reconnect (none online) — see App boundOffline. */
+.device-offline-note {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--ink-dim);
+}
+.device-offline-note::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow-clear);
+  animation: status-glow 1.8s var(--ease-out) infinite;
 }
 
 .device-picker__current {
