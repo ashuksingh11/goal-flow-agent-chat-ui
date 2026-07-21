@@ -830,12 +830,39 @@ export default function App() {
     correlationId: string,
     decisions: ApprovalDecision[],
   ) => {
+    // Record this click locally (updates the card + the approved/handoff state).
     dispatch({ type: "decisions_sent", decisions });
+
+    // v4.1: DO NOT send an `approval` frame per click. The device resumes the WHOLE
+    // plan on the FIRST `approval` frame it receives — the contract's `decisions[]`
+    // is meant to be the COMPLETE set — and the cloud closes the chat webview on that
+    // frame. Sending per proposal therefore drops every later proposal (e.g. a firm
+    // grocery order) and closes the webview early. So we send ONE frame with EVERY
+    // decision, only once every approval-required proposal has been decided.
+    const plan = state.plan;
+    if (!plan) return;
+    const required = plan.payload.proposals.filter(
+      (proposal) => proposal.tier !== "auto" && proposal.requires_approval,
+    );
+    // Merge decisions already recorded with this click — the dispatch above is async,
+    // so `state.proposalStatuses` does not yet reflect the current click.
+    const decided = new Map<string, boolean>();
+    for (const [proposalId, status] of Object.entries(state.proposalStatuses)) {
+      if (status) decided.set(proposalId, status.approved);
+    }
+    for (const decision of decisions) decided.set(decision.proposal_id, decision.approved);
+
+    if (!required.every((proposal) => decided.has(proposal.proposal_id))) return;
+
+    const fullDecisions: ApprovalDecision[] = required.map((proposal) => ({
+      proposal_id: proposal.proposal_id,
+      approved: decided.get(proposal.proposal_id) === true,
+    }));
     socketRef.current?.send({
       type: "approval",
       goal_id: goalId,
       correlation_id: correlationId,
-      payload: { decisions },
+      payload: { decisions: fullDecisions },
     });
   };
 
