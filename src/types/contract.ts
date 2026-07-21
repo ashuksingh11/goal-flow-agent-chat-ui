@@ -58,6 +58,10 @@ export interface Hello {
    *  Omitted/empty ⇒ the cloud auto-binds if there's one device, else the UI
    *  awaits a `devices` list and picks one. */
   device_id?: string;
+  /** v4.1, ui only: which UI surface this socket is. `"chat"` opts into the
+   *  create-phase bracket (`chat_ui_open`/`chat_ui_close`) and the cloud's
+   *  bind-time create-phase replay. Absent ⇒ full broadcast (legacy v3 client). */
+  surface?: "input" | "chat" | "board";
 }
 
 /** Cloud → client: acknowledges registration and assigns a session. */
@@ -485,6 +489,33 @@ export interface Notice {
 }
 
 // ---------------------------------------------------------------------------
+// chat_ui_open / chat_ui_close (cloud → ui, v4.1) — the create-phase bracket
+// ---------------------------------------------------------------------------
+
+/**
+ * The chat UI is EPHEMERAL on the real device: Bixby (a native app) opens a
+ * webview hosting it when a goal's create phase begins and closes it when the
+ * create phase ends. These two frames are that bracket. The device never sees
+ * either.
+ *
+ * On the `chat` surface, `chat_ui_open` is a HARD RESET keyed to `goal_id`: drop
+ * all prior-goal state, render the fresh "listening" stage, and thereafter ignore
+ * goal-scoped frames for any other goal. Idempotent per goal — a repeat open for
+ * the already-active goal is a no-op (the cloud replays it on bind, right before
+ * replaying the cached understanding/plan, so resetting again would wipe the very
+ * state being restored). `chat_ui_close` returns the UI to its idle waiting state.
+ */
+export interface ChatUiOpen {
+  type: "chat_ui_open";
+  goal_id: string;
+}
+
+export interface ChatUiClose {
+  type: "chat_ui_close";
+  goal_id: string;
+}
+
+// ---------------------------------------------------------------------------
 // control (UI → cloud → device) — demo clock controls
 // ---------------------------------------------------------------------------
 
@@ -527,6 +558,8 @@ export type ContractMessage =
   | Proposal
   | Status
   | Notice
+  | ChatUiOpen
+  | ChatUiClose
   | Control;
 
 /** One connected device agent, offered to the UI for pairing. */
@@ -563,6 +596,8 @@ export type UiInboundMessage =
   | Status
   | Notice
   | Devices
+  | ChatUiOpen
+  | ChatUiClose
   | BoardSnapshot
   | BoardUpdate
   | GoalAccepted;

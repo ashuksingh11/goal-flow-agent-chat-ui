@@ -59,6 +59,11 @@ function describeFrame(frame: FlowFrame): string {
       return `${message.task_status}${message.payload.material ? " · material" : ""}`;
     case "notice":
       return `notice · ${message.kind}`;
+    // v4.1 create-phase bracket (cloud → this chat surface).
+    case "chat_ui_open":
+      return `create phase open · ${message.goal_id.slice(0, 8)}`;
+    case "chat_ui_close":
+      return `create phase close · ${message.goal_id.slice(0, 8)}`;
     // v3 board frames. The cloud broadcasts to EVERY ui bound to a session, so this
     // surface sees them even though Agent Board is its own app. Shown rather than
     // hidden: this is a debug view OF THE WIRE, and hiding real traffic from it

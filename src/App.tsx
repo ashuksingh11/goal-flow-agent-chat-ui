@@ -1,18 +1,25 @@
 /**
  * App — root: owns the socket, the STREAMING STATE MACHINE, and the stage.
  *
- * v3.1: the chat UI is the goal-CREATION surface. It owns goal entry, the
- * understanding gate, and the INITIAL tiered plan approval — then hands off. Once the
- * plan is approved it shows a hand-off banner and the goal's LIFE (monitoring, the
- * world-event simulation controls, and world-event adaptation approvals) moves to the
- * Agent Board. So EventStrip / DemoControls / AdaptationCard were removed from here and
- * live on the board now.
+ * v3.1: the chat UI is the goal-CREATION surface. It owns the understanding gate and
+ * the INITIAL tiered plan approval — then hands off. Once the plan is approved it shows
+ * a hand-off banner and the goal's LIFE (monitoring, the world-event simulation
+ * controls, and world-event adaptation approvals) moves to the Agent Board. So
+ * EventStrip / DemoControls / AdaptationCard were removed from here and live on the
+ * board now.
+ *
+ * v4.1: this surface is EPHEMERAL — Bixby (the `input` surface) owns goal entry and
+ * hosts this UI in a webview bracketed by `chat_ui_open`/`chat_ui_close`. The goal
+ * composer was REMOVED: goal text now comes from Bixby, so this UI never sends
+ * `user_goal`. `chat_ui_open{goal_id}` HARD-RESETS the stage keyed to that goal (and
+ * thereafter ignores goal-scoped frames for any other goal); `chat_ui_close` returns
+ * it to idle. The reset is idempotent per goal so the cloud's bind-time replay
+ * (open → understanding → present_plan) rehydrates a freshly-bound socket.
  *
  * Component tree:
  *   App
  *   ├── ProgressRail      — phase rail (agent_event:phase + task_status)
  *   ├── stage
- *   │   ├── GoalComposer  — input + MicButton (inline below)
  *   │   ├── AgentStream   — thinking stream + tool-call chips (live)
  *   │   ├── Skeleton      — plan silhouette while planning (no plan yet)
  *   │   ├── PlanCard      — the plan hero (generic) + ProposalList (initial approval)
@@ -29,7 +36,6 @@
 
 import { useEffect, useReducer, useRef, useState } from "react";
 import { AgentStream } from "./components/AgentStream";
-import { MicButton } from "./components/MicButton";
 import { PlanCard } from "./components/PlanCard";
 import { PresenterFeed } from "./components/PresenterFeed";
 import { ProgressRail } from "./components/ProgressRail";
@@ -172,7 +178,6 @@ type UiAction =
   | { type: "device_selected"; explicit: boolean }
   | { type: "open_picker" }
   | { type: "close_picker" }
-  | { type: "goal_submitted"; text: string }
   | { type: "understanding_sent"; goalId: string; confirmed: boolean }
   | { type: "decisions_sent"; decisions: ApprovalDecision[] }
   | { type: "event_fired"; eventId: string }
@@ -334,6 +339,19 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
     return state;
   }
 
+  // v4.1 strict create-phase filter: once `chat_ui_open` has keyed the stage to a
+  // goal, IGNORE every goal-scoped frame for any OTHER goal (a superseded or
+  // previous goal's late/replayed frames). `chat_ui_open` itself is exempt — it is
+  // what (re)targets the active goal (a supersede is a retarget, not a reset flicker).
+  if (
+    message.type !== "chat_ui_open" &&
+    "goal_id" in message &&
+    state.activeGoalId !== null &&
+    message.goal_id !== state.activeGoalId
+  ) {
+    return state;
+  }
+
   const withGoal =
     "goal_id" in message && message.goal_id !== state.activeGoalId
       ? { ...state, activeGoalId: message.goal_id }
@@ -391,6 +409,72 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         ],
         activeGoalId: null,
         declinedGoalId: message.goal_id,
+        understanding: null,
+        phase: null,
+        working: false,
+        agentEntries: [],
+        draftItems: [],
+        plan: null,
+        pristinePlan: null,
+        changedPlanIds: [],
+        planMorphs: {},
+        morphSeq: 0,
+        changedImpactLabels: [],
+        proposalStatuses: {},
+        adaptations: [],
+        eventChips: [],
+        firedEventIds: [],
+        firingEventId: null,
+        approved: false,
+        ticks: [],
+        lastSeq: 0,
+      };
+
+    case "chat_ui_open": {
+      // The create phase for `goal_id` began → HARD RESET, keyed to this goal.
+      // IDEMPOTENT per goal: a repeat open for the already-active goal is a no-op,
+      // because the cloud replays chat_ui_open on bind right before replaying the
+      // cached understanding/plan — resetting again would wipe the restored state.
+      if (state.activeGoalId === message.goal_id) {
+        return state;
+      }
+      // Drop ALL prior-goal stage state and render the fresh "listening" stage
+      // (modeled on the `notice` reset shape). Device-pairing state (boundDeviceId,
+      // deviceChoices, explicitPair, pickerOpen, modules) is deliberately preserved.
+      return {
+        ...state,
+        activeGoalId: message.goal_id,
+        declinedGoalId: null,
+        understanding: null,
+        phase: "interpreting",
+        working: true,
+        agentEntries: [],
+        draftItems: [],
+        plan: null,
+        pristinePlan: null,
+        changedPlanIds: [],
+        planMorphs: {},
+        morphSeq: 0,
+        changedImpactLabels: [],
+        proposalStatuses: {},
+        adaptations: [],
+        eventChips: [],
+        firedEventIds: [],
+        firingEventId: null,
+        approved: false,
+        ticks: [],
+        lastSeq: 0,
+      };
+    }
+
+    case "chat_ui_close":
+      // The create phase for the active goal terminated (approval / declined gate /
+      // terminal error) → return to the idle waiting state. The board owns the goal
+      // now. (The strict filter above already dropped a close for any other goal;
+      // the post-approval handoff banner was the pre-close beat.)
+      return {
+        ...withGoal,
+        activeGoalId: null,
         understanding: null,
         phase: null,
         working: false,
@@ -567,38 +651,6 @@ function reducer(state: UiState, action: UiAction): UiState {
     case "close_picker":
       return { ...state, pickerOpen: false };
 
-    case "goal_submitted":
-      // new goal resets the stage; rail lights "interpreting" immediately
-      // (the device's own phase events take over as they stream in)
-      return {
-        ...state,
-        nextId: state.nextId + 1,
-        transcript: [
-          ...state.transcript,
-          { kind: "goal", id: state.nextId, text: action.text },
-        ],
-        activeGoalId: null,
-        understanding: null,
-        phase: "interpreting",
-        working: true,
-        agentEntries: [],
-        draftItems: [],
-        plan: null,
-        pristinePlan: null,
-        changedPlanIds: [],
-        planMorphs: {},
-        morphSeq: 0,
-        changedImpactLabels: [],
-        proposalStatuses: {},
-        adaptations: [],
-        eventChips: [],
-        firedEventIds: [],
-        firingEventId: null,
-        approved: false,
-        ticks: [],
-        lastSeq: 0,
-      };
-
     case "understanding_sent":
       if (action.confirmed) {
         return {
@@ -773,13 +825,6 @@ export default function App() {
     socketRef.current?.send({ type: "goal_state_get", goal_id: goalId });
   }, [state.boundDeviceId]);
 
-  const submitGoal = (text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    dispatch({ type: "goal_submitted", text: trimmed });
-    socketRef.current?.send({ type: "user_goal", text: trimmed });
-  };
-
   const sendDecisions = (
     goalId: string,
     correlationId: string,
@@ -824,12 +869,6 @@ export default function App() {
   const pairedDevice = state.boundDeviceId
     ? state.deviceChoices?.find((d) => d.device_id === state.boundDeviceId) ?? null
     : null;
-  const goalDisabled =
-    connection !== "open" ||
-    awaitingDevicePick ||
-    state.working ||
-    state.understanding !== null ||
-    state.plan !== null;
   const latestNote = [...state.transcript].reverse().find((entry) => entry.kind === "note");
 
   return (
@@ -872,8 +911,6 @@ export default function App() {
               onChange={() => dispatch({ type: "open_picker" })}
             />
           ) : null}
-
-          <GoalComposer onSubmit={submitGoal} disabled={goalDisabled} />
 
           {latestNote && !state.activeGoalId && !state.working && !state.plan ? (
             <p className="transcript-note">{latestNote.text}</p>
@@ -946,47 +983,5 @@ export default function App() {
         </div>
       ) : null}
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// GoalComposer — the single input row (kept inline: it is App's only input)
-// ---------------------------------------------------------------------------
-
-function GoalComposer({
-  onSubmit,
-  disabled,
-}: {
-  onSubmit: (text: string) => void;
-  disabled: boolean;
-}) {
-  const [draft, setDraft] = useState("");
-
-  const submit = () => {
-    onSubmit(draft);
-    setDraft("");
-  };
-
-  return (
-    <form
-      className="goal-composer"
-      onSubmit={(event) => {
-        event.preventDefault();
-        submit();
-      }}
-    >
-      <input
-        type="text"
-        value={draft}
-        placeholder="What should the home take care of?"
-        disabled={disabled}
-        onChange={(event) => setDraft(event.target.value)}
-      />
-      <MicButton onTranscript={onSubmit} disabled />
-      <button type="submit" disabled={disabled || !draft.trim()}>
-        Go
-      </button>
-      {/* TODO(M-impl): example-goal chips when idle (meal week / guest dinner) */}
-    </form>
   );
 }
