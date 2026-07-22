@@ -24,6 +24,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { CSSProperties } from "react";
 import type { ApprovalDecision, PresentPlan } from "../types/contract";
 import type { ProposalStatusMap } from "../types/ui";
+import { formatWhen } from "../lib/date";
 import { ProposalList } from "./ProposalList";
 
 type PlanMorph = { prevTitle: string; prevDetail?: string };
@@ -113,6 +114,7 @@ export function PlanCard({
           const isChanged = changed.has(item.id);
           const morph = morphs[item.id];
           const day = item.day || index + 1;
+          const when = formatWhen(item.when) ?? `Day ${day}`;
 
           return (
             <li
@@ -140,7 +142,7 @@ export function PlanCard({
                 {isChanged ? (
                   <span className="plan-item__updated-badge">Updated</span>
                 ) : null}
-                <span className="plan-item__when">Day {day}</span>
+                <span className="plan-item__when">{when}</span>
               </div>
               <span className={morph ? "plan-item__detail plan-item__detail--in" : "plan-item__detail"}>
                 {item.detail}
