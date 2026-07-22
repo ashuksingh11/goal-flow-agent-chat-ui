@@ -9,6 +9,7 @@
  */
 
 import type { Status } from "../types/contract";
+import { formatWhen } from "../lib/date";
 
 export interface StatusTimelineProps {
   ticks: Status[];
@@ -26,12 +27,9 @@ function tickLabel(tick: Status): string {
 }
 
 function tickDay(tick: Status): string {
-  const match = tick.payload.note?.match(/\bDay\s+\d+\b/);
-  if (match) return match[0];
-  const day = tick.payload.day?.trim();
-  if (!day) return "";
-  if (/^Day\s+\d+$/.test(day)) return day;
-  return /^\d+$/.test(day) ? `Day ${day}` : "";
+  // Prefer the real sim date (v4.2 shows "Tue, Jul 22", not "Day N"); fall back to the
+  // weekday label the device sends when a tick carries no sim_date.
+  return formatWhen(tick.payload.sim_date) ?? tick.payload.day?.trim() ?? "";
 }
 
 export function StatusTimeline({ ticks }: StatusTimelineProps) {
