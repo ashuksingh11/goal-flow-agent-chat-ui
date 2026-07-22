@@ -45,25 +45,27 @@ const PLANNING_MESSAGES = [
   "Finalizing…",
 ];
 const PLANNING_ROTATE_MS = 3000;
-const THOUGHT_MAX = 140;
 
 function statusForPhase(phase: RailPhase | null, active: boolean): string {
   if (!active) return "Ready for review";
   return phase ? PHASE_STATUS[phase] : "Setting up the task...";
 }
 
-function truncate(text: string, max = THOUGHT_MAX): string {
-  const clean = text.trim().replace(/\s+/g, " ");
-  return clean.length > max ? `${clean.slice(0, max - 1).trimEnd()}…` : clean;
-}
-
-/** The latest PROSE thinking text (JSON blobs are dropped in the reducer already). */
-function latestThought(entries: AgentStreamEntry[]): string {
-  for (let i = entries.length - 1; i >= 0; i -= 1) {
-    const entry = entries[i];
-    if (entry.kind === "thinking" && entry.text.trim()) return entry.text;
-  }
-  return "";
+/**
+ * The full live reasoning transcript — every prose `thinking` fragment the device
+ * streamed during grounding, in order, concatenated and lightly cleaned (JSON blobs
+ * are already dropped in the reducer). This is the real "watch it think": the device
+ * streams the model's grounding output token-chunk by token-chunk, and here it renders
+ * as one growing, auto-scrolling block rather than a single truncated latest line.
+ */
+function buildTranscript(entries: AgentStreamEntry[]): string {
+  return entries
+    .filter((e): e is Extract<AgentStreamEntry, { kind: "thinking" }> => e.kind === "thinking")
+    .map((e) => e.text)
+    .join("")
+    .replace(/[ \t]+\n/g, "\n") // trailing spaces before newlines
+    .replace(/\n{3,}/g, "\n\n") // collapse big gaps
+    .trim();
 }
 
 export function AgentStream({ entries, active, phase, planPending = false }: AgentStreamProps) {
@@ -72,13 +74,21 @@ export function AgentStream({ entries, active, phase, planPending = false }: Age
     .slice(-10);
   const status = statusForPhase(phase, active);
 
-  const thought = latestThought(entries);
+  const transcript = buildTranscript(entries);
+  const showTranscript = transcript.length > 0;
   const isPlanning = phase === "planning" && active;
-  // Grounding streams genuine prose thinking → show it live. Planning does NOT stream,
-  // so any thinking entry visible during planning is stale grounding narration; ignore
-  // it there and show the rotating planning indicator instead.
-  const showThought = !isPlanning && thought.length > 0;
+  // Planning does NOT stream (one ~60-90s call), so keep the rotating reassurance —
+  // but the grounding transcript captured before it stays visible above.
   const showPlanningIndicator = isPlanning;
+
+  // Auto-scroll the transcript to the newest fragment as it streams in.
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (!el) return;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollTo({ top: el.scrollHeight, behavior: reducedMotion ? "auto" : "smooth" });
+  }, [transcript]);
 
   // Rotating message + elapsed-seconds counter — the only motion during the otherwise
   // silent planning call. Reset whenever we leave the planning indicator.
@@ -125,15 +135,18 @@ export function AgentStream({ entries, active, phase, planPending = false }: Age
         <p className="agent-status__text">{status}</p>
       </div>
 
-      {showThought ? (
-        <p className="agent-status__thought" aria-live="polite">
-          {truncate(thought)}
-        </p>
-      ) : showPlanningIndicator ? (
+      {showTranscript ? (
+        <div className="agent-thoughts" ref={transcriptRef} aria-live="polite" aria-label="Reasoning">
+          {transcript}
+          {active ? <span className="agent-thoughts__caret" aria-hidden="true" /> : null}
+        </div>
+      ) : null}
+
+      {showPlanningIndicator ? (
         <p className="agent-status__thought agent-status__thought--planning" aria-live="polite">
           {planningMessage} · {elapsed}s
         </p>
-      ) : planPending ? (
+      ) : !showTranscript && planPending ? (
         <p className="agent-status__helper">This takes a few seconds...</p>
       ) : null}
 
