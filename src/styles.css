@@ -358,6 +358,19 @@ summary:focus-visible {
   white-space: nowrap;
   transition: color var(--dur) var(--ease-out);
 }
+/* The first and last labels sit under edge dots, so a CENTERED label overflows the
+   rail (and clips at the screen edge on narrower displays like the Family Hub). Anchor
+   the end labels inward — first to its dot's left, last to its dot's right — so the row
+   stays within bounds at any width. */
+.rail-step:first-child .rail-label {
+  left: 0;
+  transform: none;
+}
+.rail-step:last-child .rail-label {
+  left: auto;
+  right: 0;
+  transform: none;
+}
 
 .rail-step--todo .rail-connector,
 .rail-step--todo .rail-marker {
