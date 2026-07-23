@@ -36,6 +36,8 @@
 
 import { useEffect, useReducer, useRef, useState } from "react";
 import { AgentStream } from "./components/AgentStream";
+import { HarnessPipeline } from "./components/HarnessPipeline";
+import { HarnessTheater } from "./components/HarnessTheater";
 import { PlanCard } from "./components/PlanCard";
 import { PresenterFeed } from "./components/PresenterFeed";
 import { ProgressRail } from "./components/ProgressRail";
@@ -61,10 +63,12 @@ import type {
 } from "./types/contract";
 import {
   INITIAL_DEMO_CLOCK,
+  INITIAL_HARNESS,
   mergeDemoClock,
   maxRailPhase,
   railPhaseFromAgentPhase,
   railPhaseFromStatus,
+  reduceHarness,
 } from "./types/ui";
 import type {
   AgentStreamEntry,
@@ -72,6 +76,7 @@ import type {
   EventChip,
   DraftPlanItem,
   FlowFrame,
+  HarnessState,
   ProposalStatusMap,
   RailPhase,
   TranscriptEntry,
@@ -95,6 +100,8 @@ interface UiState {
   modules: CapabilityModule[] | null;
   /** Reduced agent_event stream: thinking entries + tool chips. */
   agentEntries: AgentStreamEntry[];
+  /** v5: the harness pipeline — one cell per engine + the active spotlight. */
+  harness: HarnessState;
   /** plan_progress drafts — progressively replace skeleton rows. */
   draftItems: DraftPlanItem[];
   /** The hero, once present_plan lands. Patched in place by daily adaptations. */
@@ -146,6 +153,7 @@ const INITIAL_STATE: UiState = {
   declinedGoalId: null,
   modules: null,
   agentEntries: [],
+  harness: INITIAL_HARNESS,
   draftItems: [],
   plan: null,
   pristinePlan: null,
@@ -290,6 +298,12 @@ function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
           },
         ],
       };
+
+    case "harness":
+      // v5: light up the harness pipeline. This is the star of the demo — the harness
+      // engines are finally visible, one row per engine, the active one glowing.
+      return { ...next, harness: reduceHarness(next.harness, event.payload) };
+
     default:
       // An agent_event kind this UI doesn't render — notably `task_update`, which
       // the device streams heavily (it drives Agent Board's progress, not this feed).
@@ -441,6 +455,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         phase: null,
         working: false,
         agentEntries: [],
+        harness: INITIAL_HARNESS,
         draftItems: [],
         plan: null,
         pristinePlan: null,
@@ -477,6 +492,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         phase: "interpreting",
         working: true,
         agentEntries: [],
+        harness: INITIAL_HARNESS,
         draftItems: [],
         plan: null,
         pristinePlan: null,
@@ -507,6 +523,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         phase: null,
         working: false,
         agentEntries: [],
+        harness: INITIAL_HARNESS,
         draftItems: [],
         plan: null,
         pristinePlan: null,
@@ -702,6 +719,7 @@ function reducer(state: UiState, action: UiAction): UiState {
         phase: null,
         working: false,
         agentEntries: [],
+        harness: INITIAL_HARNESS,
         draftItems: [],
         plan: null,
         pristinePlan: null,
@@ -793,6 +811,8 @@ export default function App() {
   const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [presenterMode, setPresenterMode] = useState(false);
+  // v5: full-screen "harness theater" for projecting the pipeline on stage.
+  const [theaterMode, setTheaterMode] = useState(false);
 
   useEffect(() => {
     const socket = createGoalFlowSocket({
@@ -970,6 +990,14 @@ export default function App() {
           <label className="presenter-toggle">
             <input
               type="checkbox"
+              checked={theaterMode}
+              onChange={(event) => setTheaterMode(event.target.checked)}
+            />
+            Theater
+          </label>
+          <label className="presenter-toggle">
+            <input
+              type="checkbox"
               checked={presenterMode}
               onChange={(event) => setPresenterMode(event.target.checked)}
             />
@@ -983,6 +1011,14 @@ export default function App() {
 
       <ProgressRail phase={state.phase} />
 
+      {/* v5 presenter theater: full-bleed harness pipeline for the stage. Replaces the
+          normal stage while the agent works; falls back to the stage otherwise. */}
+      {theaterMode && !state.understanding && !state.plan && (state.working || state.harness.activeModule) ? (
+        <HarnessTheater
+          harness={state.harness}
+          goalText={[...state.transcript].reverse().find((t) => t.kind === "goal")?.text ?? ""}
+        />
+      ) : (
       <main className={presenterMode ? "stage stage--with-feed" : "stage"}>
         <section className="stage__main">
           {boundOfflineReconnecting ? (
@@ -1018,14 +1054,20 @@ export default function App() {
           ) : null}
 
           {/* The live status is for the WORKING phase; once the plan is the hero
-              it collapses (raw trail stays in presenter mode). */}
+              it collapses (raw trail stays in presenter mode). v5: the Harness Pipeline
+              is the dominant region, the reasoning transcript slaved beside it. */}
           {!state.understanding && !state.plan && (state.agentEntries.length > 0 || state.working) ? (
-            <AgentStream
-              entries={state.agentEntries}
-              active={state.working}
-              phase={state.phase}
-              planPending={planPending}
-            />
+            <div className="watch">
+              <HarnessPipeline harness={state.harness} />
+              <div className="watch__reasoning">
+                <AgentStream
+                  entries={state.agentEntries}
+                  active={state.working}
+                  phase={state.phase}
+                  planPending={planPending}
+                />
+              </div>
+            </div>
           ) : null}
 
           {planPending ? (
@@ -1062,6 +1104,7 @@ export default function App() {
 
         {presenterMode ? <PresenterFeed frames={state.frames} /> : null}
       </main>
+      )}
 
       {state.approved ? (
         <div className="handoff" role="status">

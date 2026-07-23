@@ -7,8 +7,10 @@
  */
 
 import type {
+  AgentHarnessEvent,
   ApprovalTier,
   DemoEvent,
+  HarnessModule,
   TaskStatus,
   UiInboundMessage,
   UiOutboundMessage,
@@ -96,6 +98,95 @@ export function maxRailPhase(a: RailPhase | null, b: RailPhase | null): RailPhas
   const ai = RAIL_PHASES.findIndex((p) => p.id === a);
   const bi = RAIL_PHASES.findIndex((p) => p.id === b);
   return bi > ai ? b : a;
+}
+
+// ---------------------------------------------------------------------------
+// Harness pipeline (v5) — the harness engines lighting up engine-by-engine
+// ---------------------------------------------------------------------------
+
+/** Rendered status of one engine row. `blocked` is a resolved-red terminal state. */
+export type HarnessEngineStatus = "idle" | "active" | "done" | "blocked";
+
+/** One engine's live cell in the pipeline. */
+export interface HarnessEngineState {
+  status: HarnessEngineStatus;
+  /** The engine's live one-line sub-text (from the latest beat). */
+  note?: string;
+  /** Short verdict badge ("18 tools", "ready", "3 steps"). */
+  verdict?: string;
+  /** Safety grade (A0/A1/A2/AX) on the safety engine. */
+  grade?: string;
+}
+
+/** The whole pipeline: one cell per engine + which one currently holds the spotlight. */
+export interface HarnessState {
+  engines: Record<HarnessModule, HarnessEngineState>;
+  /** The engine currently `active` — the reasoning panel slaves to this. null = none. */
+  activeModule: HarnessModule | null;
+}
+
+/** The engines in fire order, with display label + a dependency-free emoji glyph. */
+export const HARNESS_PIPELINE: readonly { id: HarnessModule; label: string; glyph: string }[] = [
+  { id: "precheck", label: "Pre-Check Engine", glyph: "📋" },
+  { id: "capability_manager", label: "Capability Manager", glyph: "🧰" },
+  { id: "grounding", label: "Grounding", glyph: "🌐" },
+  { id: "planner", label: "Planner", glyph: "🗺️" },
+  { id: "safety", label: "Safety Policy Engine", glyph: "🛡️" },
+  { id: "task_manager", label: "Task Manager", glyph: "🗂️" },
+  { id: "approval", label: "Approval", glyph: "🙋" },
+  { id: "monitor_adapt", label: "Monitor & Adapt", glyph: "📡" },
+] as const;
+
+/** Human labels keyed by module, for the reasoning panel's "slaved to X" header. */
+export const HARNESS_LABEL: Record<HarnessModule, string> = Object.fromEntries(
+  HARNESS_PIPELINE.map((e) => [e.id, e.label]),
+) as Record<HarnessModule, string>;
+
+function idleEngines(): Record<HarnessModule, HarnessEngineState> {
+  return Object.fromEntries(
+    HARNESS_PIPELINE.map((e) => [e.id, { status: "idle" as HarnessEngineStatus }]),
+  ) as Record<HarnessModule, HarnessEngineState>;
+}
+
+export const INITIAL_HARNESS: HarnessState = { engines: idleEngines(), activeModule: null };
+
+/**
+ * Fold one `agent_event {harness}` beat into the pipeline. Last-write-wins per engine
+ * (correct for a live view: a monitoring re-run legitimately re-lights an engine). An
+ * unknown module is ignored so adding an engine device-side stays additive.
+ */
+export function reduceHarness(state: HarnessState, payload: AgentHarnessEvent["payload"]): HarnessState {
+  const { module, status, note, verdict, grade } = payload;
+  if (!(module in state.engines)) return state;
+
+  const mapped: HarnessEngineStatus =
+    status === "enter" || status === "active"
+      ? "active"
+      : status === "block"
+        ? "blocked"
+        : status === "skip"
+          ? "idle"
+          : "done"; // pass | done
+
+  const prev = state.engines[module];
+  const cell: HarnessEngineState = {
+    status: mapped,
+    // Keep the last note/verdict/grade if this beat omits them.
+    note: note ?? prev.note,
+    verdict: verdict ?? prev.verdict,
+    grade: grade ?? prev.grade,
+  };
+
+  // The active engine is whichever one is currently lit; when it resolves, the
+  // spotlight clears unless another engine is still active.
+  const activeModule =
+    mapped === "active"
+      ? module
+      : state.activeModule === module
+        ? null
+        : state.activeModule;
+
+  return { engines: { ...state.engines, [module]: cell }, activeModule };
 }
 
 // ---------------------------------------------------------------------------
