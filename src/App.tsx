@@ -1,18 +1,25 @@
 /**
  * App — root: owns the socket, the STREAMING STATE MACHINE, and the stage.
  *
- * v3.1: the chat UI is the goal-CREATION surface. It owns goal entry, the
- * understanding gate, and the INITIAL tiered plan approval — then hands off. Once the
- * plan is approved it shows a hand-off banner and the goal's LIFE (monitoring, the
- * world-event simulation controls, and world-event adaptation approvals) moves to the
- * Agent Board. So EventStrip / DemoControls / AdaptationCard were removed from here and
- * live on the board now.
+ * v3.1: the chat UI is the goal-CREATION surface. It owns the understanding gate and
+ * the INITIAL tiered plan approval — then hands off. Once the plan is approved it shows
+ * a hand-off banner and the goal's LIFE (monitoring, the world-event simulation
+ * controls, and world-event adaptation approvals) moves to the Agent Board. So
+ * EventStrip / DemoControls / AdaptationCard were removed from here and live on the
+ * board now.
+ *
+ * v4.1: this surface is EPHEMERAL — Bixby (the `input` surface) owns goal entry and
+ * hosts this UI in a webview bracketed by `chat_ui_open`/`chat_ui_close`. The goal
+ * composer was REMOVED: goal text now comes from Bixby, so this UI never sends
+ * `user_goal`. `chat_ui_open{goal_id}` HARD-RESETS the stage keyed to that goal (and
+ * thereafter ignores goal-scoped frames for any other goal); `chat_ui_close` returns
+ * it to idle. The reset is idempotent per goal so the cloud's bind-time replay
+ * (open → understanding → present_plan) rehydrates a freshly-bound socket.
  *
  * Component tree:
  *   App
  *   ├── ProgressRail      — phase rail (agent_event:phase + task_status)
  *   ├── stage
- *   │   ├── GoalComposer  — input + MicButton (inline below)
  *   │   ├── AgentStream   — thinking stream + tool-call chips (live)
  *   │   ├── Skeleton      — plan silhouette while planning (no plan yet)
  *   │   ├── PlanCard      — the plan hero (generic) + ProposalList (initial approval)
@@ -29,7 +36,6 @@
 
 import { useEffect, useReducer, useRef, useState } from "react";
 import { AgentStream } from "./components/AgentStream";
-import { MicButton } from "./components/MicButton";
 import { PlanCard } from "./components/PlanCard";
 import { PresenterFeed } from "./components/PresenterFeed";
 import { ProgressRail } from "./components/ProgressRail";
@@ -172,7 +178,6 @@ type UiAction =
   | { type: "device_selected"; explicit: boolean }
   | { type: "open_picker" }
   | { type: "close_picker" }
-  | { type: "goal_submitted"; text: string }
   | { type: "understanding_sent"; goalId: string; confirmed: boolean }
   | { type: "decisions_sent"; decisions: ApprovalDecision[] }
   | { type: "event_fired"; eventId: string }
@@ -189,6 +194,12 @@ function pushFrame(state: UiState, direction: FlowFrame["direction"], message: F
     nextId: state.nextId + 1,
     frames: [...state.frames.slice(-(MAX_FRAMES - 1)), frame],
   };
+}
+
+/** A thinking fragment that is actually raw JSON (a leaked plan blob), not prose. */
+function looksLikeJson(text: string): boolean {
+  const trimmed = text.trimStart();
+  return trimmed.startsWith("{") || trimmed.startsWith("[");
 }
 
 /** agent_event → live stream entries (the "watch it think" reduction). */
@@ -210,10 +221,18 @@ function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
 
     case "thinking": {
       const last = next.agentEntries[next.agentEntries.length - 1];
+      const merged = last?.kind === "thinking" ? last.text + event.payload.text : event.payload.text;
+      // The plan-compose path can emit ONE `thinking` frame carrying the raw plan
+      // JSON (being removed device-side — defended against here too). Never render
+      // JSON as a "thought": drop the frame when the fragment, or the buffer it would
+      // extend, looks like a JSON object/array. Genuine grounding narration is prose
+      // and still accumulates as before.
+      if (looksLikeJson(event.payload.text) || looksLikeJson(merged)) {
+        return next;
+      }
       if (last?.kind === "thinking") {
         // consecutive fragments accumulate into one streaming line
-        const merged = { ...last, text: last.text + event.payload.text };
-        return { ...next, agentEntries: [...next.agentEntries.slice(0, -1), merged] };
+        return { ...next, agentEntries: [...next.agentEntries.slice(0, -1), { ...last, text: merged }] };
       }
       return {
         ...next,
@@ -328,9 +347,36 @@ function isPlanApproved(plan: PresentPlan | null, statuses: ProposalStatusMap): 
   );
 }
 
+/**
+ * Is the device this UI is bound to actually ONLINE?
+ *
+ * The cloud's `devices` list contains ONLY currently-connected agents (offline ones
+ * are omitted entirely — never sent with online:false), so presence in the list IS
+ * "online". Returns true when we have no binding yet or no list yet (nothing to heal):
+ * "offline" is a claim we can only make once a `devices` frame has arrived and our
+ * bound id is missing from it.
+ */
+function boundDeviceOnline(boundId: string | null, choices: DeviceInfo[] | null): boolean {
+  if (!boundId || choices === null) return true;
+  return choices.some((device) => device.device_id === boundId);
+}
+
 /** The single inbound-frame → UI-state mapping (see ARCHITECTURE.md table). */
 function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
   if ("goal_id" in message && message.goal_id === state.declinedGoalId) {
+    return state;
+  }
+
+  // v4.1 strict create-phase filter: once `chat_ui_open` has keyed the stage to a
+  // goal, IGNORE every goal-scoped frame for any OTHER goal (a superseded or
+  // previous goal's late/replayed frames). `chat_ui_open` itself is exempt — it is
+  // what (re)targets the active goal (a supersede is a retarget, not a reset flicker).
+  if (
+    message.type !== "chat_ui_open" &&
+    "goal_id" in message &&
+    state.activeGoalId !== null &&
+    message.goal_id !== state.activeGoalId
+  ) {
     return state;
   }
 
@@ -391,6 +437,72 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         ],
         activeGoalId: null,
         declinedGoalId: message.goal_id,
+        understanding: null,
+        phase: null,
+        working: false,
+        agentEntries: [],
+        draftItems: [],
+        plan: null,
+        pristinePlan: null,
+        changedPlanIds: [],
+        planMorphs: {},
+        morphSeq: 0,
+        changedImpactLabels: [],
+        proposalStatuses: {},
+        adaptations: [],
+        eventChips: [],
+        firedEventIds: [],
+        firingEventId: null,
+        approved: false,
+        ticks: [],
+        lastSeq: 0,
+      };
+
+    case "chat_ui_open": {
+      // The create phase for `goal_id` began → HARD RESET, keyed to this goal.
+      // IDEMPOTENT per goal: a repeat open for the already-active goal is a no-op,
+      // because the cloud replays chat_ui_open on bind right before replaying the
+      // cached understanding/plan — resetting again would wipe the restored state.
+      if (state.activeGoalId === message.goal_id) {
+        return state;
+      }
+      // Drop ALL prior-goal stage state and render the fresh "listening" stage
+      // (modeled on the `notice` reset shape). Device-pairing state (boundDeviceId,
+      // deviceChoices, explicitPair, pickerOpen, modules) is deliberately preserved.
+      return {
+        ...state,
+        activeGoalId: message.goal_id,
+        declinedGoalId: null,
+        understanding: null,
+        phase: "interpreting",
+        working: true,
+        agentEntries: [],
+        draftItems: [],
+        plan: null,
+        pristinePlan: null,
+        changedPlanIds: [],
+        planMorphs: {},
+        morphSeq: 0,
+        changedImpactLabels: [],
+        proposalStatuses: {},
+        adaptations: [],
+        eventChips: [],
+        firedEventIds: [],
+        firingEventId: null,
+        approved: false,
+        ticks: [],
+        lastSeq: 0,
+      };
+    }
+
+    case "chat_ui_close":
+      // The create phase for the active goal terminated (approval / declined gate /
+      // terminal error) → return to the idle waiting state. The board owns the goal
+      // now. (The strict filter above already dropped a close for any other goal;
+      // the post-approval handoff banner was the pre-close beat.)
+      return {
+        ...withGoal,
+        activeGoalId: null,
         understanding: null,
         phase: null,
         working: false,
@@ -567,38 +679,6 @@ function reducer(state: UiState, action: UiAction): UiState {
     case "close_picker":
       return { ...state, pickerOpen: false };
 
-    case "goal_submitted":
-      // new goal resets the stage; rail lights "interpreting" immediately
-      // (the device's own phase events take over as they stream in)
-      return {
-        ...state,
-        nextId: state.nextId + 1,
-        transcript: [
-          ...state.transcript,
-          { kind: "goal", id: state.nextId, text: action.text },
-        ],
-        activeGoalId: null,
-        understanding: null,
-        phase: "interpreting",
-        working: true,
-        agentEntries: [],
-        draftItems: [],
-        plan: null,
-        pristinePlan: null,
-        changedPlanIds: [],
-        planMorphs: {},
-        morphSeq: 0,
-        changedImpactLabels: [],
-        proposalStatuses: {},
-        adaptations: [],
-        eventChips: [],
-        firedEventIds: [],
-        firingEventId: null,
-        approved: false,
-        ticks: [],
-        lastSeq: 0,
-      };
-
     case "understanding_sent":
       if (action.confirmed) {
         return {
@@ -743,6 +823,28 @@ export default function App() {
   // Anything else renders the picker.
   useEffect(() => {
     if (!state.deviceChoices?.length) return;
+
+    // SELF-HEAL an offline binding. We are bound to a device the (online-only)
+    // `devices` list no longer contains — e.g. the device restarted under a fresh
+    // auto-generated id, so our stale id silently binds to an empty session that
+    // declines every goal. When EXACTLY ONE device is online, auto-rebind to it
+    // (demo has one device — it should just work), even when the pairing was
+    // explicit (?device=). 0 or 2+ online → leave it to the picker / reconnecting
+    // note. Runs BEFORE the explicitPair early-return so an explicit-but-dead
+    // binding still heals. The `only !== bound` guard never re-sends for the id we
+    // are already on (and a bound id that is offline is by definition NOT `only`,
+    // which is online), so this cannot loop.
+    if (state.boundDeviceId && !boundDeviceOnline(state.boundDeviceId, state.deviceChoices)) {
+      if (state.deviceChoices.length === 1) {
+        const only = state.deviceChoices[0].device_id;
+        if (only !== state.boundDeviceId) {
+          rememberDeviceId(only);
+          selectDevice(only, false);
+        }
+      }
+      return;
+    }
+
     if (state.boundDeviceId && state.explicitPair) return; // already settled
 
     const remembered = getRememberedDeviceId();
@@ -773,24 +875,44 @@ export default function App() {
     socketRef.current?.send({ type: "goal_state_get", goal_id: goalId });
   }, [state.boundDeviceId]);
 
-  const submitGoal = (text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    dispatch({ type: "goal_submitted", text: trimmed });
-    socketRef.current?.send({ type: "user_goal", text: trimmed });
-  };
-
   const sendDecisions = (
     goalId: string,
     correlationId: string,
     decisions: ApprovalDecision[],
   ) => {
+    // Record this click locally (updates the card + the approved/handoff state).
     dispatch({ type: "decisions_sent", decisions });
+
+    // v4.1: DO NOT send an `approval` frame per click. The device resumes the WHOLE
+    // plan on the FIRST `approval` frame it receives — the contract's `decisions[]`
+    // is meant to be the COMPLETE set — and the cloud closes the chat webview on that
+    // frame. Sending per proposal therefore drops every later proposal (e.g. a firm
+    // grocery order) and closes the webview early. So we send ONE frame with EVERY
+    // decision, only once every approval-required proposal has been decided.
+    const plan = state.plan;
+    if (!plan) return;
+    const required = plan.payload.proposals.filter(
+      (proposal) => proposal.tier !== "auto" && proposal.requires_approval,
+    );
+    // Merge decisions already recorded with this click — the dispatch above is async,
+    // so `state.proposalStatuses` does not yet reflect the current click.
+    const decided = new Map<string, boolean>();
+    for (const [proposalId, status] of Object.entries(state.proposalStatuses)) {
+      if (status) decided.set(proposalId, status.approved);
+    }
+    for (const decision of decisions) decided.set(decision.proposal_id, decision.approved);
+
+    if (!required.every((proposal) => decided.has(proposal.proposal_id))) return;
+
+    const fullDecisions: ApprovalDecision[] = required.map((proposal) => ({
+      proposal_id: proposal.proposal_id,
+      approved: decided.get(proposal.proposal_id) === true,
+    }));
     socketRef.current?.send({
       type: "approval",
       goal_id: goalId,
       correlation_id: correlationId,
-      payload: { decisions },
+      payload: { decisions: fullDecisions },
     });
   };
 
@@ -819,17 +941,21 @@ export default function App() {
     !state.explicitPair &&
     (state.deviceChoices?.length ?? 0) > 1 &&
     stageIdle;
+  // Bound to a device that is NOT in the (online-only) `devices` list → the paired
+  // device agent is offline. Without this the UI stays "paired" to a dead session and
+  // silently declines every goal, never offering the picker (boundDeviceId is truthy).
+  // The settle effect above auto-rebinds when exactly one device is online; otherwise
+  // we surface the picker (2+) or a reconnecting note (0).
+  const boundOffline = !boundDeviceOnline(state.boundDeviceId, state.deviceChoices);
+  // While an offline binding is self-healing (exactly one device online) or simply
+  // waiting for a device to reappear (0 online), show a reassuring note rather than a
+  // picker. A real CHOICE is only needed when 2+ devices are online.
+  const boundOfflineReconnecting = boundOffline && (state.deviceChoices?.length ?? 0) < 2;
   // ...or the user asked to switch devices.
-  const awaitingDevicePick = unbound || ambiguousAutoPair || state.pickerOpen;
+  const awaitingDevicePick = unbound || ambiguousAutoPair || boundOffline || state.pickerOpen;
   const pairedDevice = state.boundDeviceId
     ? state.deviceChoices?.find((d) => d.device_id === state.boundDeviceId) ?? null
     : null;
-  const goalDisabled =
-    connection !== "open" ||
-    awaitingDevicePick ||
-    state.working ||
-    state.understanding !== null ||
-    state.plan !== null;
   const latestNote = [...state.transcript].reverse().find((entry) => entry.kind === "note");
 
   return (
@@ -859,7 +985,11 @@ export default function App() {
 
       <main className={presenterMode ? "stage stage--with-feed" : "stage"}>
         <section className="stage__main">
-          {awaitingDevicePick ? (
+          {boundOfflineReconnecting ? (
+            <p className="device-offline-note" role="status" aria-live="polite">
+              Paired device offline — reconnecting…
+            </p>
+          ) : awaitingDevicePick ? (
             <DevicePicker
               devices={state.deviceChoices ?? []}
               currentDeviceId={state.boundDeviceId}
@@ -872,8 +1002,6 @@ export default function App() {
               onChange={() => dispatch({ type: "open_picker" })}
             />
           ) : null}
-
-          <GoalComposer onSubmit={submitGoal} disabled={goalDisabled} />
 
           {latestNote && !state.activeGoalId && !state.working && !state.plan ? (
             <p className="transcript-note">{latestNote.text}</p>
@@ -946,47 +1074,5 @@ export default function App() {
         </div>
       ) : null}
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// GoalComposer — the single input row (kept inline: it is App's only input)
-// ---------------------------------------------------------------------------
-
-function GoalComposer({
-  onSubmit,
-  disabled,
-}: {
-  onSubmit: (text: string) => void;
-  disabled: boolean;
-}) {
-  const [draft, setDraft] = useState("");
-
-  const submit = () => {
-    onSubmit(draft);
-    setDraft("");
-  };
-
-  return (
-    <form
-      className="goal-composer"
-      onSubmit={(event) => {
-        event.preventDefault();
-        submit();
-      }}
-    >
-      <input
-        type="text"
-        value={draft}
-        placeholder="What should the home take care of?"
-        disabled={disabled}
-        onChange={(event) => setDraft(event.target.value)}
-      />
-      <MicButton onTranscript={onSubmit} disabled />
-      <button type="submit" disabled={disabled || !draft.trim()}>
-        Go
-      </button>
-      {/* TODO(M-impl): example-goal chips when idle (meal week / guest dinner) */}
-    </form>
   );
 }

@@ -40,6 +40,10 @@ const INBOUND_TYPES = new Set([
   "status",
   "notice",
   "devices",
+  // v4.1: the create-phase bracket. Without these two lines the frames are
+  // silently dropped by the allowlist and the hard-reset-on-open never fires.
+  "chat_ui_open",
+  "chat_ui_close",
   // v3: the cloud broadcasts to EVERY ui bound to a session, so this surface also
   // receives the board's frames. It ignores them (Agent Board is its own app) — but
   // they are listed so they are ignored DELIBERATELY rather than dropped as unknown.
@@ -232,6 +236,9 @@ function openSharedSocket() {
     const hello = {
       type: "hello",
       role: "ui",
+      // v4.1: declare this socket's surface. "chat" opts into the create-phase
+      // bracket (chat_ui_open/close) + the cloud's bind-time create-phase replay.
+      surface: "chat",
       ...(deviceId ? { device_id: deviceId } : {}),
     } satisfies UiOutboundMessage;
     ws.send(JSON.stringify(hello));
