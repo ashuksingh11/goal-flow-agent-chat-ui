@@ -225,6 +225,40 @@ export interface AgentTaskUpdateEvent extends AgentEventBase {
   payload: Record<string, unknown>;
 }
 
+/** v5: the harness engines, in roughly the order they fire during a plan. */
+export type HarnessModule =
+  | "precheck"
+  | "capability_manager"
+  | "grounding"
+  | "planner"
+  | "safety"
+  | "task_manager"
+  | "approval"
+  | "monitor_adapt";
+
+/** v5: `active` lights an engine up; `pass`/`done` = green, `block` = red, `skip` = greyed. */
+export type HarnessStatus = "enter" | "active" | "pass" | "block" | "done" | "skip";
+
+/**
+ * v5: a HARNESS ENGINE entered or finished a step → light up its row in the harness
+ * pipeline. Where `phase` is coarse (grounding → planning → checking), this names the
+ * specific engine at work (Pre-Check, Capability Manager, Safety Policy, …) so the UI
+ * can show the harness — the star of the system — actually working, engine-by-engine.
+ */
+export interface AgentHarnessEvent extends AgentEventBase {
+  event: "harness";
+  payload: {
+    module: HarnessModule;
+    status: HarnessStatus;
+    /** The engine's live one-line sub-text. */
+    note?: string;
+    /** Short badge: "12 tools", "ready", "3 steps", "1 blocked". */
+    verdict?: string;
+    /** Safety grade (A0/A1/A2/AX) on `safety` beats. */
+    grade?: string;
+  };
+}
+
 /** Discriminate on `event` (after narrowing `type === "agent_event"`). */
 export type AgentEvent =
   | AgentPhaseEvent
@@ -232,7 +266,8 @@ export type AgentEvent =
   | AgentToolCallEvent
   | AgentToolResultEvent
   | AgentPlanProgressEvent
-  | AgentTaskUpdateEvent;
+  | AgentTaskUpdateEvent
+  | AgentHarnessEvent;
 
 export type AgentEventKind = AgentEvent["event"];
 
