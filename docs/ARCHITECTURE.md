@@ -49,6 +49,7 @@ nowhere else, so the streaming behavior is testable and the components stay pres
 | `agent_event · tool_call` | push chip `{module, fn, running}` | chip pops in (spring), accent ring while running |
 | `agent_event · tool_result` | resolve most recent matching running chip → `done` + summary | chip flips to ✓ + one-line summary |
 | `agent_event · plan_progress` | push `draftItems` | one skeleton row is replaced by a real draft row |
+| `agent_event · harness` (v5) | QUEUED via `enqueueHarness`, then applied one at a time by `drainHarness` (see "Harness pacing") | the named engine's row glows `working…`, then settles green with its verdict badge |
 | `understanding` | `understanding` set; `working` off; phase → confirming | **UnderstandingCard** renders objective/constraints/thought and blocks on Confirm & plan / Decline before the device plans |
 | `present_plan` | `plan` set; `understanding` cleared; `working` off; drafts cleared; phase → awaiting_approval; `eventChips` built from `payload.demo_events` | **the hero animates in** over the dissolving skeleton; if the plan carries `demo_events`, EventStrip appears once approved |
 | `proposal` (adapting) | append `adaptations`; phase → monitoring; `event_id` (if present) marks the matching event chip `fired` | the loud AdaptationCard slides in with a glow |
@@ -63,6 +64,30 @@ reconnect). Outbound (`user_goal`, `approval`, `control`) are mirrored into the 
 `user_goal` resets the stage and optimistically lights "Interpreting" until the device's own phase
 events take over. Approvals mark their proposals `pending` optimistically and flip to `done` only
 when a `status.executed[]` entry confirms.
+
+## Harness pacing (why `harness` beats are queued)
+
+The device does NOT do each engine's work between that engine's `active` and its resolve.
+Safety vets every tool call *during* grounding/planning, the task DAG is decomposed *before*
+grounding, and proposals are registered *before* the approval beat — so Safety, Task Manager
+and Approval each emit `active` + resolve back-to-back. Measured on a real run: all six of
+those beats landed inside **10 ms**, with `plan_ready` 41 ms later. Painting on arrival meant
+those three engines flashed past unseen and the panel was then unmounted by the plan.
+
+Two rules fix it, both purely about WHEN we paint — order, verdicts and total latency stay
+exactly what the device reported:
+
+1. **Render floor** (`HARNESS_ACTIVE_FLOOR_MS` = 550 ms, `HARNESS_RESOLVE_STEP_MS` = 150 ms):
+   beats land in `harness.queue` and a timer in `App.tsx` applies them one at a time, never
+   faster than the floor. Engines with real work between their beats (Grounding, Planner —
+   seconds) are never delayed, because their own gap already exceeds the floor. Cost is
+   ~1 s at the head and ~1.6 s at the tail of a 60–90 s plan.
+2. **Outlive the plan**: the panel stays mounted past `present_plan` while the queue drains,
+   plus a `HARNESS_SETTLE_MS` (900 ms) window so the last engine's badge is read, then
+   collapses to a one-line glyph ribbon ("7/7 engines cleared") above the plan hero.
+
+`settled` gates the collapse; `INITIAL_HARNESS` resets queue + settled, so every stage reset
+(`chat_ui_open`, `chat_ui_close`, `notice`, `understanding_sent`) clears in-flight pacing.
 
 ## Progress rail
 

@@ -1790,7 +1790,60 @@ summary:focus-visible {
   0%, 100% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.5); opacity: 0.45; }
 }
+/* --- collapsed receipt: the strip left behind once the plan is the hero --- */
+.harness--collapsed {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.55rem 0.85rem;
+  box-shadow: none;
+  animation: harness-collapse-in 0.4s var(--ease-out);
+}
+@keyframes harness-collapse-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+.harness-strip {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.harness-strip__cell {
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  font-size: 0.8rem;
+  background: var(--surface-2);
+  border: 1px solid var(--stroke);
+}
+.harness-strip__cell--done { background: var(--good-soft); border-color: transparent; }
+.harness-strip__cell--blocked { background: var(--danger-soft); border-color: transparent; }
+.harness-strip__cell--idle { opacity: 0.45; }
+/* visually-hidden label so the strip is readable by screen readers, not just hover */
+.harness-strip__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.harness__summary {
+  flex: none;
+  font-size: 0.78rem;
+  color: var(--ink-dim);
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .harness--collapsed,
   .harness__livedot,
   .harness-row__pulse,
   .harness-row--active,

@@ -64,11 +64,14 @@ import type {
 import {
   INITIAL_DEMO_CLOCK,
   INITIAL_HARNESS,
+  drainHarness,
+  enqueueHarness,
+  harnessStarted,
   mergeDemoClock,
   maxRailPhase,
   railPhaseFromAgentPhase,
   railPhaseFromStatus,
-  reduceHarness,
+  settleHarness,
 } from "./types/ui";
 import type {
   AgentStreamEntry,
@@ -183,6 +186,8 @@ const INITIAL_STATE: UiState = {
 type UiAction =
   | { type: "recv"; message: UiInboundMessage }
   | { type: "sent"; message: UiOutboundMessage }
+  | { type: "harness_tick" }
+  | { type: "harness_settled" }
   | { type: "device_selected"; explicit: boolean }
   | { type: "open_picker" }
   | { type: "close_picker" }
@@ -302,7 +307,11 @@ function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
     case "harness":
       // v5: light up the harness pipeline. This is the star of the demo — the harness
       // engines are finally visible, one row per engine, the active one glowing.
-      return { ...next, harness: reduceHarness(next.harness, event.payload) };
+      // The beat is QUEUED, not applied: Safety / Task Manager / Approval emit their
+      // `active` and resolve in the same millisecond (their real work happens earlier —
+      // see HARNESS_ACTIVE_FLOOR_MS), so painting on arrival flashed them past unseen.
+      // The `harness_tick` timer below drains the queue at eye speed.
+      return { ...next, harness: enqueueHarness(next.harness, event.payload) };
 
     default:
       // An agent_event kind this UI doesn't render — notably `task_update`, which
@@ -684,6 +693,14 @@ function reducer(state: UiState, action: UiAction): UiState {
     case "sent":
       return pushFrame(state, "sent", action.message);
 
+    case "harness_tick":
+      // Show the next queued harness beat (paced — see HARNESS_ACTIVE_FLOOR_MS).
+      return { ...state, harness: drainHarness(state.harness, Date.now()) };
+
+    case "harness_settled":
+      // Every beat is shown and the last one has been read — release the collapse.
+      return { ...state, harness: settleHarness(state.harness) };
+
     case "device_selected":
       // Only a real CHOICE (the picker, or the device this browser remembered) settles
       // the pairing. Auto-picking the only device on offer is still a guess, so it stays
@@ -827,6 +844,19 @@ export default function App() {
       socketRef.current = null;
     };
   }, []);
+
+  // v5 harness pacing: drain the beat queue one beat at a time, never faster than the
+  // floor armed by the previous beat. Re-arms itself while the queue is non-empty, so a
+  // burst of same-millisecond beats (Safety → Task Manager → Approval) plays out as a
+  // watchable sequence instead of a single frame. Nothing is skipped or reordered.
+  useEffect(() => {
+    const { queue, holdUntil, settled } = state.harness;
+    if (queue.length === 0 && settled) return;
+    const wait = Math.max(0, holdUntil - Date.now());
+    const next: UiAction = queue.length > 0 ? { type: "harness_tick" } : { type: "harness_settled" };
+    const timer = setTimeout(() => dispatch(next), wait);
+    return () => clearTimeout(timer);
+  }, [state.harness.queue, state.harness.holdUntil, state.harness.settled]);
 
   const selectDevice = (deviceId: string, explicit = true) => {
     if (explicit) {
@@ -978,6 +1008,20 @@ export default function App() {
     : null;
   const latestNote = [...state.transcript].reverse().find((entry) => entry.kind === "note");
 
+  // v5: the pipeline used to be UNMOUNTED the instant `present_plan` landed — and the
+  // device sends plan_ready immediately after the Approval beat, so the last engines'
+  // resolved badges were yanked off screen before anyone could read them. Now the panel
+  // OUTLIVES the plan's arrival until the beat queue has drained, then collapses to a
+  // one-line "engines cleared" ribbon above the plan hero (the plan is still the hero;
+  // the harness just gets to finish its sentence).
+  const harnessDraining = state.harness.queue.length > 0 || !state.harness.settled;
+  const showHarnessPanel =
+    !state.understanding &&
+    (state.agentEntries.length > 0 || state.working || harnessDraining) &&
+    (!state.plan || harnessDraining);
+  const showHarnessRibbon =
+    !state.understanding && state.plan !== null && !harnessDraining && harnessStarted(state.harness);
+
   return (
     <div className="app">
       <header className="app-header">
@@ -1013,7 +1057,10 @@ export default function App() {
 
       {/* v5 presenter theater: full-bleed harness pipeline for the stage. Replaces the
           normal stage while the agent works; falls back to the stage otherwise. */}
-      {theaterMode && !state.understanding && !state.plan && (state.working || state.harness.activeModule) ? (
+      {theaterMode &&
+      !state.understanding &&
+      (!state.plan || harnessDraining) &&
+      (state.working || harnessDraining || state.harness.activeModule) ? (
         <HarnessTheater
           harness={state.harness}
           goalText={[...state.transcript].reverse().find((t) => t.kind === "goal")?.text ?? ""}
@@ -1056,7 +1103,7 @@ export default function App() {
           {/* The live status is for the WORKING phase; once the plan is the hero
               it collapses (raw trail stays in presenter mode). v5: the Harness Pipeline
               is the dominant region, the reasoning transcript slaved beside it. */}
-          {!state.understanding && !state.plan && (state.agentEntries.length > 0 || state.working) ? (
+          {showHarnessPanel ? (
             <div className="watch">
               <HarnessPipeline harness={state.harness} />
               <div className="watch__reasoning">
@@ -1069,6 +1116,9 @@ export default function App() {
               </div>
             </div>
           ) : null}
+
+          {/* ...and once it has finished, it stays as a one-line receipt. */}
+          {showHarnessRibbon ? <HarnessPipeline harness={state.harness} collapsed /> : null}
 
           {planPending ? (
             <>

@@ -14,12 +14,50 @@ import type { HarnessState } from "../types/ui";
  */
 const CREATE_ENGINES = HARNESS_PIPELINE.filter((e) => e.id !== "monitor_adapt");
 
-export function HarnessPipeline({ harness }: { harness: HarnessState }) {
+export function HarnessPipeline({
+  harness,
+  collapsed = false,
+}: {
+  harness: HarnessState;
+  collapsed?: boolean;
+}) {
   const activeLabel = harness.activeModule ? HARNESS_LABEL[harness.activeModule] : null;
-  const done = CREATE_ENGINES.filter((e) => {
+  const resolved = CREATE_ENGINES.filter((e) => {
     const s = harness.engines[e.id].status;
     return s === "done" || s === "blocked";
-  }).length;
+  });
+  const done = resolved.length;
+  const blocked = CREATE_ENGINES.filter((e) => harness.engines[e.id].status === "blocked");
+
+  // COLLAPSED: the receipt the panel leaves behind once the plan is the hero — the same
+  // engines, same order, reduced to a glyph strip. Without this the pipeline vanished
+  // the instant `present_plan` landed and the last engines were never seen resolving.
+  if (collapsed) {
+    return (
+      <section className="harness harness--collapsed" aria-label="Harness pipeline (complete)">
+        <span className="harness__eyebrow">Harness</span>
+        <ol className="harness-strip">
+          {CREATE_ENGINES.map((e) => (
+            <li
+              key={e.id}
+              className={`harness-strip__cell harness-strip__cell--${harness.engines[e.id].status}`}
+              title={`${e.label} — ${harness.engines[e.id].verdict ?? harness.engines[e.id].status}`}
+            >
+              <span aria-hidden>{e.glyph}</span>
+              <span className="harness-strip__sr">
+                {e.label}: {harness.engines[e.id].verdict ?? harness.engines[e.id].status}
+              </span>
+            </li>
+          ))}
+        </ol>
+        <span className="harness__summary">
+          {blocked.length > 0
+            ? `${blocked.length} blocked by policy`
+            : `${done}/${CREATE_ENGINES.length} engines cleared`}
+        </span>
+      </section>
+    );
+  }
 
   return (
     <section className="harness" aria-label="Harness pipeline">
