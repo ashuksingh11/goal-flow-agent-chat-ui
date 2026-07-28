@@ -16,7 +16,7 @@
  * it to idle. The reset is idempotent per goal so the cloud's bind-time replay
  * (open → understanding → present_plan) rehydrates a freshly-bound socket.
  *
- v5.1: the stage is ONE working column (Pencil "Option E"). The phase rail and the
+ * v5.1: the stage is ONE working column (Pencil "Option E"). The phase rail and the
  * side-by-side pipeline + reasoning panel are gone — they were two progress indicators
  * for the same run, and the harness is the one that tells the truth.
  *
@@ -124,6 +124,12 @@ interface UiState {
   draftQueue: DraftPlanItem[];
   /** epoch-ms floor: the next queued row must not be revealed before this. */
   draftHoldUntil: number;
+  /**
+   * How many rows the finished plan has, as announced by `plan_progress.total` (v5.1).
+   * Null until a device tells us — pre-v5.1 devices never do, and PlanColumn falls back
+   * to a single placeholder rather than inventing a horizon.
+   */
+  draftTotal: number | null;
   /** The hero, once present_plan lands. Patched in place by daily adaptations. */
   plan: PresentPlan | null;
   /** The original plan_ready payload, restored by Reset week. */
@@ -178,6 +184,7 @@ const INITIAL_STATE: UiState = {
   draftItems: [],
   draftQueue: [],
   draftHoldUntil: 0,
+  draftTotal: null,
   plan: null,
   pristinePlan: null,
   changedPlanIds: [],
@@ -329,6 +336,7 @@ function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
             day: event.payload.item.day,
           },
         ],
+        draftTotal: event.payload.total ?? next.draftTotal,
       };
 
     case "harness":
@@ -497,6 +505,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         draftItems: [],
         draftQueue: [],
         draftHoldUntil: 0,
+        draftTotal: null,
         plan: null,
         pristinePlan: null,
         changedPlanIds: [],
@@ -537,6 +546,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         draftItems: [],
         draftQueue: [],
         draftHoldUntil: 0,
+        draftTotal: null,
         plan: null,
         pristinePlan: null,
         changedPlanIds: [],
@@ -571,6 +581,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         draftItems: [],
         draftQueue: [],
         draftHoldUntil: 0,
+        draftTotal: null,
         plan: null,
         pristinePlan: null,
         changedPlanIds: [],
@@ -802,6 +813,7 @@ function reducer(state: UiState, action: UiAction): UiState {
         draftItems: [],
         draftQueue: [],
         draftHoldUntil: 0,
+        draftTotal: null,
         plan: null,
         pristinePlan: null,
         changedPlanIds: [],
@@ -1214,6 +1226,7 @@ export default function App() {
             {showOutcome ? (
               <PlanColumn
                 drafts={state.draftItems}
+                announcedTotal={state.draftTotal}
                 forming={formingPlan}
                 plan={state.plan}
                 changedIds={state.changedPlanIds}

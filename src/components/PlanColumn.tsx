@@ -29,6 +29,8 @@ import { PlanCard } from "./PlanCard";
 export interface PlanColumnProps {
   /** Rows revealed so far (paced out of the reveal queue). */
   drafts: DraftPlanItem[];
+  /** `plan_progress.total` if the device announced one (v5.1); null on older devices. */
+  announcedTotal: number | null;
   /** True while rows are still being revealed. */
   forming: boolean;
   plan: PresentPlan | null;
@@ -42,6 +44,7 @@ export interface PlanColumnProps {
 
 export function PlanColumn({
   drafts,
+  announcedTotal,
   forming,
   plan,
   changedIds,
@@ -51,9 +54,12 @@ export function PlanColumn({
   proposalStatuses,
   onDecide,
 }: PlanColumnProps) {
-  // The real total, the moment we have it. Null while the plan itself is still in
-  // flight — then we show one placeholder rather than pretending to know the count.
-  const total = plan?.payload.plan.length ?? null;
+  // The real total, the moment we have it. `plan_progress.total` arrives with the FIRST
+  // row, so the slots are exact from the very first frame; the plan's own length is the
+  // fallback for a pre-v5.1 device, and is usually here too because plan_ready follows
+  // the burst by milliseconds. Null in neither case → one placeholder, no invented
+  // horizon.
+  const total = announcedTotal ?? plan?.payload.plan.length ?? null;
   const slots = total !== null ? Math.max(0, total - drafts.length) : forming ? 1 : 0;
   const screened = plan?.payload.safety.gate === "passed";
 
