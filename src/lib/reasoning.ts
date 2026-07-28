@@ -40,7 +40,7 @@ export function statusForPhase(phase: RailPhase | null, active: boolean): string
 }
 
 /**
- * Remove JSON the model interleaved with its prose.
+ * Redact JSON the model interleaved with its prose.
  *
  * The grounding model narrates ("broke the goal into 7 steps: …") and then, in the same
  * stream, dumps the structured context it assembled. That blob is not a thought and must
@@ -67,20 +67,73 @@ export function stripJsonBlobs(text: string): string {
       continue;
     }
     const end = scanBalanced(text, i);
-    // Unterminated → the blob is still streaming; drop the rest and stop.
-    if (end === -1) break;
-    i = end;
+    // A blob is REDACTED, not deleted. The device streams very little prose — one
+    // narration burst at the top of grounding and then silence through the tool loop —
+    // so the assembled context is most of what there is to see. Dropping it silently
+    // left the card looking frozen, which reads as "the agent stopped thinking".
+    // A marker naming what it gathered keeps the card alive and stays honest.
+    if (end === -1) {
+      out = appendMarker(out, "⟨context · still arriving…⟩");
+      break; // unterminated: the rest is the blob, still streaming
+    }
+    out = appendMarker(out, describeBlob(text.slice(i, end)));
+    // The marker already ends the line; swallow the newline the blob was followed by so
+    // the redaction does not leave a blank line where the JSON used to be.
+    i = end < text.length && text[end] === "\n" ? end + 1 : end;
   }
-  return out
-    // Residue from a blob that began before this buffer did (e.g. after a reconnect):
-    // a line starting with a quoted identifier-like key. Prose does not open a line
-    // with `"snake_case":`.
-    .replace(/^[\s,}\]]*"[A-Za-z_][\w]*"\s*:.*$/gm, "")
-    // Lines that are nothing but JSON punctuation left behind.
-    .replace(/^[\s{}[\],]+$/gm, "")
-    .replace(/[ \t]+$/gm, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return (
+    out
+      // Residue from a blob that began before this buffer did (e.g. after a reconnect):
+      // a line starting with a quoted identifier-like key. Prose does not open a line
+      // with `"snake_case":`.
+      .replace(/^[\s,}\]]*"[A-Za-z_][\w]*"\s*:.*$/gm, "⟨context⟩")
+      // Lines that are nothing but JSON punctuation left behind — taken out whole, so
+      // they do not leave a blank line behind them. Requires at least one punctuation
+      // character, so a genuine paragraph break is never eaten.
+      .replace(/^[ \t]*[{}[\],][ \t{}[\],]*$\n?/gm, "")
+      .replace(/[ \t]+$/gm, "")
+      // One blob can leave several adjacent markers (its own, plus residue lines from
+      // the same object). Keep the most informative and drop the rest — the reader
+      // wants to know context WAS gathered, not how the parser saw it.
+      .replace(/^(?:⟨context[^⟩]*⟩[ \t]*\n?)+/gm, (run) => {
+        const best = run
+          .trim()
+          .split("\n")
+          .reduce((a, b) => (b.length > a.length ? b : a));
+        return run.endsWith("\n") ? `${best}\n` : best;
+      })
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  );
+}
+
+/** Put a marker on its own line without inventing a blank one around it. */
+function appendMarker(out: string, marker: string): string {
+  const sep = out.length === 0 || out.endsWith("\n") ? "" : "\n";
+  return `${out}${sep}${marker}\n`;
+}
+
+/**
+ * One line standing in for a redacted blob, describing it from its own contents — the
+ * top-level keys it carried, or how many entries. Nothing is inferred or invented; if it
+ * will not parse (models emit near-JSON), the marker says only that context was gathered.
+ */
+function describeBlob(blob: string): string {
+  try {
+    const value: unknown = JSON.parse(blob);
+    if (Array.isArray(value)) {
+      return `⟨context · ${value.length} item${value.length === 1 ? "" : "s"}⟩`;
+    }
+    if (value && typeof value === "object") {
+      const keys = Object.keys(value as Record<string, unknown>);
+      if (keys.length === 0) return "⟨context⟩";
+      const shown = keys.slice(0, 5).join(", ");
+      return `⟨context · ${shown}${keys.length > 5 ? ", …" : ""}⟩`;
+    }
+  } catch {
+    // near-JSON, or a fragment — fall through
+  }
+  return "⟨context⟩";
 }
 
 /** Index just past the JSON value opening at `start`, or -1 if it never closes. */

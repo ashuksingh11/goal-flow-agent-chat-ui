@@ -179,20 +179,26 @@ export function WorkingColumn({
 
                   {cell.note ? <p className="focus__note">{cell.note}</p> : null}
 
-                  <div className="focus__body" ref={bodyRef} aria-live="polite" aria-label="Reasoning">
-                    {transcript ? (
-                      <>
-                        {transcript}
-                        <span className="focus__caret" aria-hidden />
-                      </>
-                    ) : (
-                      <span className="focus__waiting">
-                        {planning
-                          ? PLANNING_MESSAGES[rotation % PLANNING_MESSAGES.length]
-                          : statusForPhase(phase, working)}
-                      </span>
-                    )}
-                  </div>
+                  {/* The phase frame is NOT paced, so while the card is only borrowed by
+                      the next engine the phase has usually already moved on — showing its
+                      status here would caption a queued engine with the next one's work.
+                      Borrowed card: transcript only, no status. */}
+                  {transcript || !pending ? (
+                    <div className="focus__body" ref={bodyRef} aria-live="polite" aria-label="Reasoning">
+                      {transcript ? (
+                        <>
+                          {transcript}
+                          <span className="focus__caret" aria-hidden />
+                        </>
+                      ) : (
+                        <span className="focus__waiting">
+                          {planning
+                            ? PLANNING_MESSAGES[rotation % PLANNING_MESSAGES.length]
+                            : statusForPhase(phase, working)}
+                        </span>
+                      )}
+                    </div>
+                  ) : null}
 
                   {chips.length > 0 ? (
                     <div className="focus__calls" aria-label="Capability calls">

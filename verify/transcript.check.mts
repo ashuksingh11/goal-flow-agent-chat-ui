@@ -34,33 +34,38 @@ check(
   stripJsonBlobs(
     'broke the goal into 7 steps: Gather items.\n{ "time_window": { "start": "2026-07-28", "end": "2026-08-02" }, "size": 4 }\nNow selecting recipes.',
   ),
-  "broke the goal into 7 steps: Gather items.\n\nNow selecting recipes.",
+  "broke the goal into 7 steps: Gather items.\n⟨context · time_window, size⟩\nNow selecting recipes.",
 );
 
 // 2. still streaming (never closes) — cut to the end, keep the prose before it
 check(
   "unterminated blob",
   stripJsonBlobs('Assembling context.\n{ "family": { "members": [{ "name": "Priya"'),
-  "Assembling context.",
+  "Assembling context.\n⟨context · still arriving…⟩",
 );
 
 // 3. a brace inside a string must not close the blob early
 check(
   "brace inside a string literal",
   stripJsonBlobs('Note.\n{ "note": "a } inside", "x": 1 }\nDone.'),
-  "Note.\n\nDone.",
+  "Note.\n⟨context · note, x⟩\nDone.",
 );
 
 // 4. escaped quote inside a string
-check("escaped quote", stripJsonBlobs('A.\n{ "q": "say \\" then }", "y": 2 }\nB.'), "A.\n\nB.");
+check(
+  "escaped quote",
+  stripJsonBlobs('A.\n{ "q": "say \\" then }", "y": 2 }\nB.'),
+  "A.\n⟨context · q, y⟩\nB.",
+);
 
-// 5. residue when the opening brace arrived before this buffer (reconnect mid-blob)
+// 5. residue when the opening brace arrived before this buffer (reconnect mid-blob) —
+//    one blob leaves several adjacent markers, and they collapse to the most informative
 check(
   "headless residue lines",
   stripJsonBlobs(
     'Checking.\n"budget_cap_usd": 120,\n"quiet_hours": { "start": "21:30" }\n},\nCarrying on.',
   ),
-  "Checking.\n\nCarrying on.",
+  "Checking.\n⟨context · start⟩\nCarrying on.",
 );
 
 // 6. prose is untouched — arrows, colons, quotes, apostrophes, numbered lists
@@ -72,7 +77,7 @@ check("prose untouched", stripJsonBlobs(prose), prose);
 check(
   "array blob",
   stripJsonBlobs('Items:\n[{ "id": "inv-001" }, { "id": "inv-002" }]\nthat is all.'),
-  "Items:\n\nthat is all.",
+  "Items:\n⟨context · 2 items⟩\nthat is all.",
 );
 
 // 8. nothing to do

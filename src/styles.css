@@ -1397,7 +1397,13 @@ summary:focus-visible {
 /* --------------------------------- run ----------------------------------- */
 
 .run {
-  flex: 3 1 0;
+  /* Sized by its CONTENT, capped. It used to be `flex: 3 1 0` so the focus card could
+     absorb every spare pixel and keep the column's total height invariant — but with a
+     one-line note that produced a near-empty box the height of half the screen. The card
+     now grows with what it has to say and the transcript scrolls at its own cap, so the
+     page still never scrolls and the outcome below takes the room that is left. */
+  flex: 0 1 auto;
+  max-height: 62%;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -1497,11 +1503,13 @@ summary:focus-visible {
 .run-row--done,
 .run-row--blocked { animation: receipt-in 260ms var(--ease-out) both; }
 
-.run-row--focus { flex: 1; min-height: 0; align-items: stretch; }
+.run-row--focus { flex: 0 1 auto; min-height: 0; align-items: stretch; }
 .run-row--focus .run-dot { align-self: flex-start; margin-top: 0.9rem; }
 
 .focus {
-  flex: 1;
+  /* Fills the row's WIDTH (the row is horizontal: dot + card); its HEIGHT comes from its
+     content, capped by .run-row--focus / .focus__body. */
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -1544,8 +1552,10 @@ summary:focus-visible {
 }
 .focus__note { margin: 0; font-size: 0.88rem; color: var(--ink-dim); }
 .focus__body {
-  flex: 1;
+  /* Grows with the text and then scrolls, rather than claiming the space up front. */
+  flex: 0 1 auto;
   min-height: 0;
+  max-height: 34vh;
   overflow-y: auto;
   font-size: 0.97rem;
   line-height: 1.66;
@@ -1583,7 +1593,8 @@ summary:focus-visible {
 /* ------------------------------- outcome --------------------------------- */
 
 .outcome {
-  flex: 2 1 0;
+  /* Takes whatever the run does not need. */
+  flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
