@@ -238,12 +238,6 @@ function pushFrame(state: UiState, direction: FlowFrame["direction"], message: F
   };
 }
 
-/** A thinking fragment that is actually raw JSON (a leaked plan blob), not prose. */
-function looksLikeJson(text: string): boolean {
-  const trimmed = text.trimStart();
-  return trimmed.startsWith("{") || trimmed.startsWith("[");
-}
-
 /** agent_event → live stream entries (the "watch it think" reduction). */
 function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
   if (event.seq <= state.lastSeq) {
@@ -264,14 +258,12 @@ function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
     case "thinking": {
       const last = next.agentEntries[next.agentEntries.length - 1];
       const merged = last?.kind === "thinking" ? last.text + event.payload.text : event.payload.text;
-      // The plan-compose path can emit ONE `thinking` frame carrying the raw plan
-      // JSON (being removed device-side — defended against here too). Never render
-      // JSON as a "thought": drop the frame when the fragment, or the buffer it would
-      // extend, looks like a JSON object/array. Genuine grounding narration is prose
-      // and still accumulates as before.
-      if (looksLikeJson(event.payload.text) || looksLikeJson(merged)) {
-        return next;
-      }
+      // Fragments accumulate VERBATIM. There used to be a per-fragment JSON filter here
+      // and it made things worse: the device streams token chunk by token chunk, so it
+      // dropped precisely the chunks holding the braces and kept everything between
+      // them — a JSON blob rendered as mangled pseudo-prose. A blob can only be
+      // recognised once the text is whole, so the filtering moved to buildTranscript
+      // (lib/reasoning.ts) and the raw stream stays intact for the presenter feed.
       if (last?.kind === "thinking") {
         // consecutive fragments accumulate into one streaming line
         return { ...next, agentEntries: [...next.agentEntries.slice(0, -1), { ...last, text: merged }] };

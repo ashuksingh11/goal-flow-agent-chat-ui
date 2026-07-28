@@ -40,20 +40,86 @@ export function statusForPhase(phase: RailPhase | null, active: boolean): string
 }
 
 /**
+ * Remove JSON the model interleaved with its prose.
+ *
+ * The grounding model narrates ("broke the goal into 7 steps: …") and then, in the same
+ * stream, dumps the structured context it assembled. That blob is not a thought and must
+ * not read as one.
+ *
+ * WHY THIS IS DONE ON THE WHOLE TEXT, NOT PER FRAME. The device streams the model token
+ * chunk by token chunk, so a blob is spread across dozens of `thinking` frames. The old
+ * defence tested each fragment for a leading `{` and dropped it — which deleted exactly
+ * the chunks carrying the braces and kept everything between them, turning a JSON blob
+ * into mangled pseudo-prose (`"time_window": "start": "2026-07-28",`). Filtering can only
+ * work once the text is whole, which is here.
+ *
+ * The scan honours string literals, so a brace inside a quoted value cannot end a blob
+ * early, and an unterminated blob (still arriving) is cut to the end.
+ */
+export function stripJsonBlobs(text: string): string {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch !== "{" && ch !== "[") {
+      out += ch;
+      i += 1;
+      continue;
+    }
+    const end = scanBalanced(text, i);
+    // Unterminated → the blob is still streaming; drop the rest and stop.
+    if (end === -1) break;
+    i = end;
+  }
+  return out
+    // Residue from a blob that began before this buffer did (e.g. after a reconnect):
+    // a line starting with a quoted identifier-like key. Prose does not open a line
+    // with `"snake_case":`.
+    .replace(/^[\s,}\]]*"[A-Za-z_][\w]*"\s*:.*$/gm, "")
+    // Lines that are nothing but JSON punctuation left behind.
+    .replace(/^[\s{}[\],]+$/gm, "")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/** Index just past the JSON value opening at `start`, or -1 if it never closes. */
+function scanBalanced(text: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === "\\") i += 1; // skip the escaped char
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{" || ch === "[") depth += 1;
+    else if (ch === "}" || ch === "]") {
+      depth -= 1;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return -1;
+}
+
+/**
  * The full live reasoning transcript — every prose `thinking` fragment the device
- * streamed, in order, concatenated and lightly cleaned (JSON blobs are already dropped
- * in the reducer). This is the real "watch it think": the device streams the model's
- * output chunk by chunk and it renders as one growing block rather than a single
- * truncated latest line.
+ * streamed, in order, concatenated and cleaned. This is the real "watch it think": the
+ * device streams the model's output chunk by chunk and it renders as one growing block
+ * rather than a single truncated latest line.
+ *
+ * Fragments are accumulated VERBATIM by the reducer (the raw stream stays intact for the
+ * presenter feed); the cleaning happens here, where the text is whole.
  */
 export function buildTranscript(entries: AgentStreamEntry[]): string {
-  return entries
-    .filter((e): e is Extract<AgentStreamEntry, { kind: "thinking" }> => e.kind === "thinking")
-    .map((e) => e.text)
-    .join("")
-    .replace(/[ \t]+\n/g, "\n") // trailing spaces before newlines
-    .replace(/\n{3,}/g, "\n\n") // collapse big gaps
-    .trim();
+  return stripJsonBlobs(
+    entries
+      .filter((e): e is Extract<AgentStreamEntry, { kind: "thinking" }> => e.kind === "thinking")
+      .map((e) => e.text)
+      .join(""),
+  );
 }
 
 /** The most recent complete sentence — the one-line summary shown when collapsed. */
