@@ -7,6 +7,7 @@
  * same wherever it renders, the chrome around it is not.
  */
 
+import type { HarnessModule } from "../types/contract";
 import type { AgentStreamEntry, RailPhase } from "../types/ui";
 
 /** The one-line "what is it doing" status, per rail phase. */
@@ -166,13 +167,20 @@ function scanBalanced(text: string, start: number): number {
  * Fragments are accumulated VERBATIM by the reducer (the raw stream stays intact for the
  * presenter feed); the cleaning happens here, where the text is whole.
  */
-export function buildTranscript(entries: AgentStreamEntry[]): string {
-  return stripJsonBlobs(
-    entries
-      .filter((e): e is Extract<AgentStreamEntry, { kind: "thinking" }> => e.kind === "thinking")
-      .map((e) => e.text)
-      .join(""),
+export function buildTranscript(entries: AgentStreamEntry[], engine?: HarnessModule): string {
+  const thinking = entries.filter(
+    (e): e is Extract<AgentStreamEntry, { kind: "thinking" }> => e.kind === "thinking",
   );
+  // Scoped to one engine when asked: the device only narrates during grounding, so showing
+  // the whole stream in every card made the Planner and Safety cards repeat grounding's
+  // text as if they had said it. Unattributed text (it arrived before any engine fired)
+  // belongs to the first engine that did fire.
+  const firstAttributed = thinking.find((e) => e.engine)?.engine ?? null;
+  const scoped =
+    engine === undefined
+      ? thinking
+      : thinking.filter((e) => e.engine === engine || (!e.engine && engine === firstAttributed));
+  return stripJsonBlobs(scoped.map((e) => e.text).join(""));
 }
 
 /** The most recent complete sentence — the one-line summary shown when collapsed. */

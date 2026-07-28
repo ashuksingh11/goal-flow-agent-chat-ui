@@ -30,13 +30,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import { HARNESS_PIPELINE, formatEngineMs } from "../types/ui";
-import type { AgentStreamEntry, HarnessState, RailPhase } from "../types/ui";
-import {
-  PLANNING_MESSAGES,
-  PLANNING_ROTATE_MS,
-  buildTranscript,
-  statusForPhase,
-} from "../lib/reasoning";
+import type { AgentStreamEntry, HarnessState } from "../types/ui";
+import { PLANNING_MESSAGES, PLANNING_ROTATE_MS, buildTranscript } from "../lib/reasoning";
 
 /** `monitor_adapt` is a BOARD engine — it never fires during goal creation. */
 const ENGINES = HARNESS_PIPELINE.filter((e) => e.id !== "monitor_adapt");
@@ -45,7 +40,6 @@ export interface WorkingColumnProps {
   harness: HarnessState;
   entries: AgentStreamEntry[];
   working: boolean;
-  phase: RailPhase | null;
   /**
    * The run is over and the plan is the hero: drop the focus card and keep the
    * receipts. The column shrinks, the outcome below grows — height still conserved.
@@ -57,7 +51,6 @@ export function WorkingColumn({
   harness,
   entries,
   working,
-  phase,
   compact = false,
 }: WorkingColumnProps) {
   const active = harness.activeModule;
@@ -71,8 +64,13 @@ export function WorkingColumn({
     return s === "done" || s === "blocked";
   }).length;
 
-  const transcript = buildTranscript(entries);
-  const showFocus = !compact && (working || active !== null);
+  // Per-engine, so a card never shows another engine's words.
+  const transcript = buildTranscript(entries, active ?? undefined);
+  const settling = !harness.settled; // beats still draining, or the settle window is open
+  // `working` goes false the moment present_plan lands, which is BEFORE the last beats
+  // have been read — so the settle window has to keep the card alive on its own, or
+  // Approval (always the last engine) is torn down within a frame of resolving.
+  const showFocus = !compact && (working || active !== null || settling);
 
   /**
    * Which engine holds the focus card. Normally the active one — but between beats
@@ -82,10 +80,24 @@ export function WorkingColumn({
    * column loses its only variable-height element for a second and everything below it
    * jumps. `pending` marks that borrowed state so it doesn't claim to be working.
    */
-  const focusId =
-    active ??
-    (showFocus ? ENGINES.find((e) => harness.engines[e.id].status === "idle")?.id ?? null : null);
-  const pending = active === null;
+  const lastFired =
+    [...ENGINES].reverse().find((e) => harness.engines[e.id].status !== "idle")?.id ?? null;
+  const focusId = !showFocus
+    ? null
+    : (active ??
+      ENGINES.find((e) => harness.engines[e.id].status === "idle")?.id ??
+      // Everything has resolved: the LAST engine keeps the card through the settle window
+      // rather than having it yanked the millisecond it finishes. Approval is always the
+      // one this happens to, and measured at 57 ms it was effectively never seen.
+      (settling ? lastFired : null));
+  /** How the card is being held: by its own running engine, ahead of it, or after it. */
+  const focusHold: "working" | "pending" | "settled" =
+    focusId === null || focusId === active
+      ? "working"
+      : harness.engines[focusId].status === "idle"
+        ? "pending"
+        : "settled";
+  const pending = focusHold !== "working";
   /**
    * Whether a focus card will actually render. It is the column's only stretchy
    * element, so with no card there is nothing to absorb slack — the column has to stop
@@ -103,8 +115,11 @@ export function WorkingColumn({
     el.scrollTo({ top: el.scrollHeight, behavior: reduced ? "auto" : "smooth" });
   }, [transcript]);
 
-  // Planning is one silent ~60-90s call — rotate a line so the card isn't frozen.
-  const planning = phase === "planning" && working;
+  // Planning is one silent ~60-90s call — rotate a line so the card isn't frozen. Keyed
+  // to the ENGINE holding the card, not to `phase`: phase frames are not paced, so by the
+  // time Grounding is painted the phase has usually moved to planning and the card would
+  // caption Grounding with the planner's words.
+  const planning = focusId === "planner" && working;
   const [rotation, setRotation] = useState(0);
   useEffect(() => {
     if (!planning) {
@@ -159,8 +174,27 @@ export function WorkingColumn({
           if (engine.id === focusId && showFocus) {
             return (
               <li key={engine.id} className="run-row run-row--focus">
-                <i className={pending ? "run-dot run-dot--ghost" : "run-dot run-dot--live"} aria-hidden />
-                <article className={pending ? "focus focus--pending" : "focus"}>
+                <i
+                  className={
+                    focusHold === "working"
+                      ? "run-dot run-dot--live"
+                      : focusHold === "settled"
+                        ? "run-dot"
+                        : "run-dot run-dot--ghost"
+                  }
+                  aria-hidden
+                >
+                  {focusHold === "settled" ? "✓" : null}
+                </i>
+                <article
+                  className={
+                    focusHold === "working"
+                      ? "focus"
+                      : focusHold === "settled"
+                        ? "focus focus--settled"
+                        : "focus focus--pending"
+                  }
+                >
                   <header className="focus__head">
                     <span className="focus__tile" aria-hidden>
                       {engine.glyph}
@@ -168,8 +202,12 @@ export function WorkingColumn({
                     <span className="focus__names">
                       <strong className="focus__name">{engine.label}</strong>
                       <span className="focus__sub">
-                        {pending ? "up next" : "working"}
-                        {!pending && startedAt !== null
+                        {focusHold === "pending"
+                          ? "up next"
+                          : focusHold === "settled"
+                            ? (cell.verdict ?? "done")
+                            : "working"}
+                        {focusHold === "working" && startedAt !== null
                           ? ` · ${((now - startedAt) / 1000).toFixed(1)}s`
                           : ""}
                       </span>
@@ -190,12 +228,15 @@ export function WorkingColumn({
                           {transcript}
                           <span className="focus__caret" aria-hidden />
                         </>
-                      ) : (
+                      ) : planning ? (
                         <span className="focus__waiting">
-                          {planning
-                            ? PLANNING_MESSAGES[rotation % PLANNING_MESSAGES.length]
-                            : statusForPhase(phase, working)}
+                          {PLANNING_MESSAGES[rotation % PLANNING_MESSAGES.length]}
                         </span>
+                      ) : (
+                        // No transcript from this engine: its own note (rendered above)
+                        // already says what it is doing. A phase-derived line here would
+                        // describe a different engine's work.
+                        <span className="focus__waiting">{cell.note ? "" : "working…"}</span>
                       )}
                     </div>
                   ) : null}

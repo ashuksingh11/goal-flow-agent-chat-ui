@@ -161,6 +161,12 @@ export interface HarnessState {
   /** epoch-ms floor: the next queued beat must not be applied before this. */
   holdUntil: number;
   /**
+   * The engine that is running ON THE WIRE — updated the moment a beat is accepted, not
+   * when it is painted. `activeModule` is the painted one and deliberately lags; this is
+   * what streamed `thinking` text is attributed to. See AgentStreamEntry.module.
+   */
+  wireActive: HarnessModule | null;
+  /**
    * False from the first beat until the queue has drained AND the settle window has
    * elapsed. Gates the COLLAPSE, so the last engine's resolved badge is read in the full
    * panel rather than being swapped for the ribbon the instant it turns green.
@@ -182,14 +188,25 @@ export interface HarnessState {
  * the device reported, we just refuse to paint a state change faster than the eye can
  * follow. Engines with real work between their beats (Grounding, Planner — tens of
  * seconds) are never delayed, because their gap already exceeds the floor.
+ *
+ * Raised 550 → 1100 ms after v5.1: the tail engines each now get a full focus CARD rather
+ * than a row, and half a second is not long enough to read an engine's name, its note and
+ * its verdict before the card is replaced. Cost is ~2.5 s at the tail of a 2–4 minute run,
+ * paid entirely in paint timing — order, verdicts and reported latency are untouched, and
+ * the receipts the engines leave behind are permanent either way.
  */
-export const HARNESS_ACTIVE_FLOOR_MS = 550;
+export const HARNESS_ACTIVE_FLOOR_MS = 1100;
 
 /** Smaller floor after a resolve, so a settled badge is seen before the next engine lights. */
-export const HARNESS_RESOLVE_STEP_MS = 150;
+export const HARNESS_RESOLVE_STEP_MS = 260;
 
-/** How long the full panel lingers after the LAST beat resolves, before collapsing. */
-export const HARNESS_SETTLE_MS = 900;
+/**
+ * How long the last engine keeps the focus card after its beat resolves, before the
+ * column collapses to receipts. Raised 900 → 1600 ms with v5.1: Approval is always the
+ * engine this window belongs to, and it is the one a viewer most wants to read (it is
+ * what the approvals below are about).
+ */
+export const HARNESS_SETTLE_MS = 1600;
 
 /** The engines in fire order, with display label + a dependency-free emoji glyph. */
 export const HARNESS_PIPELINE: readonly { id: HarnessModule; label: string; glyph: string }[] = [
@@ -217,6 +234,7 @@ function idleEngines(): Record<HarnessModule, HarnessEngineState> {
 export const INITIAL_HARNESS: HarnessState = {
   engines: idleEngines(),
   activeModule: null,
+  wireActive: null,
   queue: [],
   holdUntil: 0,
   settled: true, // nothing has fired, so there is nothing to wait for
@@ -247,6 +265,13 @@ export function enqueueHarness(
   return {
     ...state,
     engines: { ...state.engines, [payload.module]: timed },
+    // Wire-level spotlight: what the DEVICE is running right now, regardless of what we
+    // have painted yet.
+    wireActive: entering
+      ? payload.module
+      : state.wireActive === payload.module
+        ? null
+        : state.wireActive,
     queue: [...state.queue, payload],
     settled: false,
   };
@@ -336,6 +361,18 @@ export type AgentStreamEntry =
       id: number;
       /** Accumulated text — consecutive thinking events append here. */
       text: string;
+      /**
+       * The engine that was running ON THE WIRE when this text arrived, so the focus card
+       * shows only what ITS engine said. Read from `HarnessState.wireActive`, never from
+       * `activeModule`: the latter is the PAINTED engine and lags behind by the render
+       * floor, which would file grounding's narration under whatever is on screen.
+       * Null only for text that arrives before any engine has fired.
+       *
+       * Named `engine`, not `module`: a chip's `module` is a CAPABILITY module
+       * (Inventory, Calendar) — a different thing entirely, and sharing the name both
+       * confused the reader and broke the union's discrimination.
+       */
+      engine?: HarnessModule | null;
     }
   | {
       kind: "chip";

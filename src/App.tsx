@@ -256,16 +256,21 @@ function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
     }
 
     case "thinking": {
+      // Attributed to the engine running ON THE WIRE, so each focus card shows only what
+      // its own engine said. `activeModule` is the PAINTED engine and lags by the render
+      // floor, which would file grounding's narration under whichever card is on screen.
+      const engine = next.harness.wireActive;
       const last = next.agentEntries[next.agentEntries.length - 1];
-      const merged = last?.kind === "thinking" ? last.text + event.payload.text : event.payload.text;
+      const sameEngine = last?.kind === "thinking" && (last.engine ?? null) === engine;
+      const merged = sameEngine && last?.kind === "thinking" ? last.text + event.payload.text : event.payload.text;
       // Fragments accumulate VERBATIM. There used to be a per-fragment JSON filter here
       // and it made things worse: the device streams token chunk by token chunk, so it
       // dropped precisely the chunks holding the braces and kept everything between
       // them — a JSON blob rendered as mangled pseudo-prose. A blob can only be
       // recognised once the text is whole, so the filtering moved to buildTranscript
       // (lib/reasoning.ts) and the raw stream stays intact for the presenter feed.
-      if (last?.kind === "thinking") {
-        // consecutive fragments accumulate into one streaming line
+      if (sameEngine && last?.kind === "thinking") {
+        // consecutive fragments from the SAME engine accumulate into one block
         return { ...next, agentEntries: [...next.agentEntries.slice(0, -1), { ...last, text: merged }] };
       }
       return {
@@ -273,7 +278,7 @@ function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
         nextId: next.nextId + 1,
         agentEntries: [
           ...next.agentEntries,
-          { kind: "thinking", id: next.nextId, text: event.payload.text },
+          { kind: "thinking", id: next.nextId, text: event.payload.text, engine },
         ],
       };
     }
@@ -1210,7 +1215,6 @@ export default function App() {
                 harness={state.harness}
                 entries={state.agentEntries}
                 working={state.working}
-                phase={state.phase}
                 compact={runCompact}
               />
             ) : null}

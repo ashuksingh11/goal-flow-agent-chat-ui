@@ -1436,21 +1436,26 @@ summary:focus-visible {
 }
 
 .run-row {
+  /* The spine has to pass through the CENTRE of the dots it threads, so both are derived
+     from the same two numbers rather than eyeballed. */
+  --dot-size: 18px;
+  --row-pad-x: 0.25rem;
+  --spine-w: 2px;
   position: relative;
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 0.38rem 0.25rem;
+  padding: 0.38rem var(--row-pad-x);
 }
 /* The spine is composed per row rather than drawn as one absolute line, so it can
    never drift out of register with the dots it is threading. */
 .run-row::before {
   content: "";
   position: absolute;
-  left: 8px;
+  left: calc(var(--row-pad-x) + var(--dot-size) / 2 - var(--spine-w) / 2);
   top: 0;
   bottom: 0;
-  width: 2px;
+  width: var(--spine-w);
   background: var(--stroke);
 }
 .run-row--done::before,
@@ -1463,8 +1468,8 @@ summary:focus-visible {
   position: relative;
   z-index: 1;
   flex: none;
-  width: 18px;
-  height: 18px;
+  width: var(--dot-size);
+  height: var(--dot-size);
   border-radius: 50%;
   display: grid;
   place-items: center;
@@ -1706,3 +1711,9 @@ summary:focus-visible {
 .focus--pending { border-color: var(--stroke); box-shadow: 0 6px 26px rgba(26, 31, 51, 0.08); }
 .focus--pending .focus__tile { background: var(--surface-2); }
 .focus--pending .focus__sub { color: var(--ink-faint); }
+
+/* The last engine keeps the card through the settle window, resolved — green rather than
+   accent, so it reads as finished rather than still working. */
+.focus--settled { border-color: color-mix(in srgb, var(--good) 45%, transparent); box-shadow: 0 6px 26px rgba(18, 161, 80, 0.12); }
+.focus--settled .focus__tile { background: var(--good-soft); }
+.focus--settled .focus__sub { color: var(--good); }
