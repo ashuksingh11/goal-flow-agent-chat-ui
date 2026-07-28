@@ -116,6 +116,32 @@ export interface HarnessEngineState {
   verdict?: string;
   /** Safety grade (A0/A1/A2/AX) on the safety engine. */
   grade?: string;
+  /**
+   * epoch-ms when this engine's `active` beat ARRIVED off the wire (not when it was
+   * painted). Paint is deliberately paced — see {@link HARNESS_ACTIVE_FLOOR_MS} — so
+   * timing read at drain time would report the floor back to us instead of the device's
+   * real work.
+   */
+  startedAt?: number;
+  /** Measured wall-clock between this engine's `active` and its resolve, in ms. */
+  ms?: number;
+}
+
+/**
+ * Below this, a receipt shows NO duration.
+ *
+ * Safety / Task Manager / Approval emit `active` and their resolve back-to-back because
+ * their real work happened earlier in the run (see {@link HARNESS_ACTIVE_FLOOR_MS}).
+ * Measured beat-to-beat that reads as ~0ms — printing "0.0s" next to an engine that did
+ * real work is a worse lie than printing nothing, so under the threshold we print
+ * nothing and let the verdict speak.
+ */
+export const HARNESS_MIN_TIMED_MS = 100;
+
+/** "0.3s" / "41.7s" — a receipt's measured duration, or null when it wasn't measurable. */
+export function formatEngineMs(ms: number | undefined): string | null {
+  if (ms == null || ms < HARNESS_MIN_TIMED_MS) return null;
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 /** One `harness` beat off the wire, waiting its turn in the pacing queue. */
@@ -202,9 +228,28 @@ export const INITIAL_HARNESS: HarnessState = {
  * unchanged — only the moment of PAINT moves. Unknown modules are dropped here (rather
  * than queued and dropped later) so adding an engine device-side stays additive.
  */
-export function enqueueHarness(state: HarnessState, payload: HarnessBeat): HarnessState {
+export function enqueueHarness(
+  state: HarnessState,
+  payload: HarnessBeat,
+  now: number,
+): HarnessState {
   if (!(payload.module in state.engines)) return state;
-  return { ...state, queue: [...state.queue, payload], settled: false };
+  // Timing is stamped HERE, on arrival — the only place that sees the device's real
+  // cadence. Paint happens later and paced, so measuring there would just play the
+  // render floor back to us. `reduceHarness` carries these two fields forward.
+  const prev = state.engines[payload.module];
+  const entering = payload.status === "enter" || payload.status === "active";
+  const timed: HarnessEngineState = entering
+    ? { ...prev, startedAt: now, ms: undefined }
+    : prev.startedAt != null
+      ? { ...prev, ms: now - prev.startedAt }
+      : prev;
+  return {
+    ...state,
+    engines: { ...state.engines, [payload.module]: timed },
+    queue: [...state.queue, payload],
+    settled: false,
+  };
 }
 
 /**
@@ -255,6 +300,9 @@ export function reduceHarness(state: HarnessState, payload: HarnessBeat): Harnes
     note: note ?? prev.note,
     verdict: verdict ?? prev.verdict,
     grade: grade ?? prev.grade,
+    // Measured on arrival by enqueueHarness — carry it, never recompute here.
+    startedAt: prev.startedAt,
+    ms: prev.ms,
   };
 
   // The active engine is whichever one is currently lit; when it resolves, the
@@ -305,7 +353,21 @@ export interface DraftPlanItem {
   title: string;
   detail?: string;
   tags?: string[];
+  when?: string;
+  day?: number;
 }
+
+/**
+ * Gap between two plan rows landing in the outcome column.
+ *
+ * The planner is a SINGLE non-streaming call: the device gets the whole plan back at
+ * once and then emits `plan_progress` for every item in one tight loop (GoalAgent
+ * `foreach (var item in modelPlan.Plan)`), so all N arrive in the same millisecond.
+ * This paces the REVEAL only — same trick as the harness render floor. Nothing is
+ * invented and nothing is held back: every item shown has already cleared the safety
+ * gate, because plan_progress fires after the safety and approval beats.
+ */
+export const PLAN_ITEM_STEP_MS = 320;
 
 // ---------------------------------------------------------------------------
 // Event strip

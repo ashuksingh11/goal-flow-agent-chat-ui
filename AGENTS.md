@@ -63,10 +63,18 @@ MIRRORS the cloud's `CONTRACT.md`.
     (`item.day`), Knew chips, safety chip, impact badges, ProposalList. **Morph**: the
     changed row shows the old dish in a native `<s>` (strike-through) then slides the
     new title in — see `plan-item__old` / `plan-item__title--in` in `styles.css`.
-  - `ProposalList.tsx`, `AdaptationCard.tsx` (tiers incl. `adapt`), `ProgressRail.tsx`
-    (cloud vs device steps, revealed one-by-one), `StatusTimeline.tsx`,
-    `PresenterFeed.tsx`, `AgentStream.tsx`, `DemoControls.tsx` (clock controls — only
-    for domains without an event strip), `Skeleton.tsx`, `MicButton.tsx`, `ErrorBoundary.tsx`.
+  - **v5.1 working column** (Pencil "Option E") — `GoalBar.tsx` (goal + run clock +
+    engines-cleared hairline), `WorkingColumn.tsx` (receipts / one focus card holding the
+    transcript + tool chips / ghosts, on a spine), `PlanColumn.tsx` (the plan forming into
+    reserved slots, then `PlanCard`). These REPLACED `ProgressRail.tsx`, `AgentStream.tsx`,
+    `HarnessPipeline.tsx`, `Skeleton.tsx` and `PairedBar.tsx`, all deleted: the phase rail
+    and the harness pipeline were two progress indicators for one run, and the transcript
+    now lives inside the engine that produced it. Transcript helpers moved to
+    `lib/reasoning.ts`.
+  - `ProposalList.tsx`, `AdaptationCard.tsx` (tiers incl. `adapt`), `StatusTimeline.tsx`,
+    `PresenterFeed.tsx`, `HarnessTheater.tsx` (the full-bleed presenter view),
+    `DemoControls.tsx` (clock controls — only for domains without an event strip),
+    `MicButton.tsx`, `ErrorBoundary.tsx`.
   - NOT built: `AgentHandoff.tsx` (a cloud↔device comet viz) — aspirational spec only.
 - `src/types/contract.ts` — mirrors CONTRACT v2: `Understanding`/`UnderstandingResponse`,
   `PlanItem.day`, `DemoEvent`/`demo_events`, `trigger_event`, `event_id`, `ApprovalTier`

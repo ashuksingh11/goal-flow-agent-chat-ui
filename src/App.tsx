@@ -16,13 +16,16 @@
  * it to idle. The reset is idempotent per goal so the cloud's bind-time replay
  * (open → understanding → present_plan) rehydrates a freshly-bound socket.
  *
+ v5.1: the stage is ONE working column (Pencil "Option E"). The phase rail and the
+ * side-by-side pipeline + reasoning panel are gone — they were two progress indicators
+ * for the same run, and the harness is the one that tells the truth.
+ *
  * Component tree:
  *   App
- *   ├── ProgressRail      — phase rail (agent_event:phase + task_status)
- *   ├── stage
- *   │   ├── AgentStream   — thinking stream + tool-call chips (live)
- *   │   ├── Skeleton      — plan silhouette while planning (no plan yet)
- *   │   ├── PlanCard      — the plan hero (generic) + ProposalList (initial approval)
+ *   ├── GoalBar           — the goal, the run clock, engines-cleared hairline
+ *   ├── column
+ *   │   ├── WorkingColumn — receipts / focus card (transcript + calls) / ghosts
+ *   │   ├── PlanColumn    — the plan forming, then PlanCard + ProposalList
  *   │   └── StatusTimeline— quiet sustain ticks (monitoring)
  *   ├── UnderstandingCard — the pre-planning confirm gate
  *   ├── handoff banner    — "Plan approved — continue on your Board" (v3.1)
@@ -35,17 +38,14 @@
  */
 
 import { useEffect, useReducer, useRef, useState } from "react";
-import { AgentStream } from "./components/AgentStream";
-import { HarnessPipeline } from "./components/HarnessPipeline";
+import { GoalBar } from "./components/GoalBar";
 import { HarnessTheater } from "./components/HarnessTheater";
-import { PlanCard } from "./components/PlanCard";
+import { PlanColumn } from "./components/PlanColumn";
 import { PresenterFeed } from "./components/PresenterFeed";
-import { ProgressRail } from "./components/ProgressRail";
-import { Skeleton } from "./components/Skeleton";
 import { StatusTimeline } from "./components/StatusTimeline";
+import { WorkingColumn } from "./components/WorkingColumn";
 import { UnderstandingCard } from "./components/UnderstandingCard";
 import { DevicePicker } from "./components/DevicePicker";
-import { PairedBar } from "./components/PairedBar";
 import { createGoalFlowSocket, getDeviceId, getGoalId, getRememberedDeviceId, rememberDeviceId } from "./lib/ws";
 import type { ConnectionState, GoalFlowSocket } from "./lib/ws";
 import type {
@@ -62,8 +62,10 @@ import type {
   UiOutboundMessage,
 } from "./types/contract";
 import {
+  HARNESS_PIPELINE,
   INITIAL_DEMO_CLOCK,
   INITIAL_HARNESS,
+  PLAN_ITEM_STEP_MS,
   drainHarness,
   enqueueHarness,
   harnessStarted,
@@ -97,6 +99,13 @@ interface UiState {
   working: boolean;
   /** Pre-planning confirmation gate from the cloud. */
   understanding: Understanding | null;
+  /**
+   * The goal in words, for the goal bar. This surface never SENDS `user_goal` (v4.1 —
+   * Bixby owns goal entry), so the only place the goal text reaches us is the cloud's
+   * `understanding.objective`. Kept in state because the understanding frame itself is
+   * cleared the moment the gate is answered.
+   */
+  goalText: string;
   /** Locally declined goal; late frames for it are ignored. */
   declinedGoalId: string | null;
   /** Device module registry (capabilities frame) — chips legend / debug. */
@@ -105,8 +114,16 @@ interface UiState {
   agentEntries: AgentStreamEntry[];
   /** v5: the harness pipeline — one cell per engine + the active spotlight. */
   harness: HarnessState;
-  /** plan_progress drafts — progressively replace skeleton rows. */
+  /** plan_progress rows already REVEALED in the outcome column. */
   draftItems: DraftPlanItem[];
+  /**
+   * Rows accepted off the wire but not yet revealed. The device emits every
+   * plan_progress in one tight loop, so without this the whole plan appears in a single
+   * frame — see PLAN_ITEM_STEP_MS. Paced reveal only; nothing is withheld or invented.
+   */
+  draftQueue: DraftPlanItem[];
+  /** epoch-ms floor: the next queued row must not be revealed before this. */
+  draftHoldUntil: number;
   /** The hero, once present_plan lands. Patched in place by daily adaptations. */
   plan: PresentPlan | null;
   /** The original plan_ready payload, restored by Reset week. */
@@ -153,11 +170,14 @@ const INITIAL_STATE: UiState = {
   phase: null,
   working: false,
   understanding: null,
+  goalText: "",
   declinedGoalId: null,
   modules: null,
   agentEntries: [],
   harness: INITIAL_HARNESS,
   draftItems: [],
+  draftQueue: [],
+  draftHoldUntil: 0,
   plan: null,
   pristinePlan: null,
   changedPlanIds: [],
@@ -188,6 +208,8 @@ type UiAction =
   | { type: "sent"; message: UiOutboundMessage }
   | { type: "harness_tick" }
   | { type: "harness_settled" }
+  | { type: "draft_tick" }
+  | { type: "goal_text_restored"; goalId: string; text: string }
   | { type: "device_selected"; explicit: boolean }
   | { type: "open_picker" }
   | { type: "close_picker" }
@@ -292,14 +314,19 @@ function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
     }
 
     case "plan_progress":
+      // Queued, not shown: the device fires every item in one loop after the safety and
+      // approval beats, so all N land in the same millisecond. The `draft_tick` timer
+      // reveals them one at a time (PLAN_ITEM_STEP_MS).
       return {
         ...next,
-        draftItems: [
-          ...next.draftItems,
+        draftQueue: [
+          ...next.draftQueue,
           {
             title: event.payload.item.title,
             detail: event.payload.item.detail,
             tags: event.payload.item.tags,
+            when: event.payload.item.when,
+            day: event.payload.item.day,
           },
         ],
       };
@@ -311,7 +338,7 @@ function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
       // `active` and resolve in the same millisecond (their real work happens earlier —
       // see HARNESS_ACTIVE_FLOOR_MS), so painting on arrival flashed them past unseen.
       // The `harness_tick` timer below drains the queue at eye speed.
-      return { ...next, harness: enqueueHarness(next.harness, event.payload) };
+      return { ...next, harness: enqueueHarness(next.harness, event.payload, Date.now()) };
 
     default:
       // An agent_event kind this UI doesn't render — notably `task_update`, which
@@ -443,6 +470,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
       return {
         ...withGoal,
         understanding: message,
+        goalText: message.payload.objective || withGoal.goalText,
         working: false,
         phase: maxRailPhase(withGoal.phase, "confirming"),
       };
@@ -461,11 +489,14 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         activeGoalId: null,
         declinedGoalId: message.goal_id,
         understanding: null,
+        goalText: "",
         phase: null,
         working: false,
         agentEntries: [],
         harness: INITIAL_HARNESS,
         draftItems: [],
+        draftQueue: [],
+        draftHoldUntil: 0,
         plan: null,
         pristinePlan: null,
         changedPlanIds: [],
@@ -498,11 +529,14 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         activeGoalId: message.goal_id,
         declinedGoalId: null,
         understanding: null,
+        goalText: "",
         phase: "interpreting",
         working: true,
         agentEntries: [],
         harness: INITIAL_HARNESS,
         draftItems: [],
+        draftQueue: [],
+        draftHoldUntil: 0,
         plan: null,
         pristinePlan: null,
         changedPlanIds: [],
@@ -529,11 +563,14 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         ...withGoal,
         activeGoalId: null,
         understanding: null,
+        goalText: "",
         phase: null,
         working: false,
         agentEntries: [],
         harness: INITIAL_HARNESS,
         draftItems: [],
+        draftQueue: [],
+        draftHoldUntil: 0,
         plan: null,
         pristinePlan: null,
         changedPlanIds: [],
@@ -557,7 +594,12 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         plan: message,
         pristinePlan: message,
         working: false,
-        draftItems: [],
+        // NOT cleared here (v5.1). plan_ready follows the plan_progress burst by
+        // milliseconds, so wiping the reveal queue on arrival meant the outcome column
+        // jumped straight to the finished hero and the rows never landed one by one.
+        // The queue drains on its own; PlanColumn swaps to the hero when it is empty —
+        // which is also what makes the slot count exact, since by then the true total
+        // is known. Only a goal boundary (chat_ui_open/close, notice) resets these.
         changedPlanIds: [],
         planMorphs: {},
         morphSeq: 0,
@@ -697,6 +739,25 @@ function reducer(state: UiState, action: UiAction): UiState {
       // Show the next queued harness beat (paced — see HARNESS_ACTIVE_FLOOR_MS).
       return { ...state, harness: drainHarness(state.harness, Date.now()) };
 
+    case "draft_tick": {
+      // Reveal the next plan row.
+      const [row, ...rest] = state.draftQueue;
+      if (!row) return state;
+      return {
+        ...state,
+        draftItems: [...state.draftItems, row],
+        draftQueue: rest,
+        draftHoldUntil: Date.now() + PLAN_ITEM_STEP_MS,
+      };
+    }
+
+    case "goal_text_restored":
+      // Remembered locally (see the effect below) — only ever applied to the goal it
+      // was stored for, and never over a text the wire has already given us.
+      return state.activeGoalId === action.goalId && state.goalText === ""
+        ? { ...state, goalText: action.text }
+        : state;
+
     case "harness_settled":
       // Every beat is shown and the last one has been read — release the collapse.
       return { ...state, harness: settleHarness(state.harness) };
@@ -732,12 +793,15 @@ function reducer(state: UiState, action: UiAction): UiState {
         ],
         activeGoalId: null,
         understanding: null,
+        goalText: "",
         declinedGoalId: action.goalId,
         phase: null,
         working: false,
         agentEntries: [],
         harness: INITIAL_HARNESS,
         draftItems: [],
+        draftQueue: [],
+        draftHoldUntil: 0,
         plan: null,
         pristinePlan: null,
         changedPlanIds: [],
@@ -858,6 +922,55 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [state.harness.queue, state.harness.holdUntil, state.harness.settled]);
 
+  // v5.1 plan reveal pacing — the outcome column fills one row at a time, for the same
+  // reason the harness has a render floor: the device emits every plan_progress in a
+  // single loop, so unpaced the whole plan appears in one frame.
+  useEffect(() => {
+    if (state.draftQueue.length === 0) return;
+    const wait = Math.max(0, state.draftHoldUntil - Date.now());
+    const timer = setTimeout(() => dispatch({ type: "draft_tick" }), wait);
+    return () => clearTimeout(timer);
+  }, [state.draftQueue, state.draftHoldUntil]);
+
+  // The run clock shown in the goal bar: starts with the goal, freezes when the work
+  // stops (so it reports how long the run took, not how long the tab has been open).
+  const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
+  const [runEndedAt, setRunEndedAt] = useState<number | null>(null);
+  useEffect(() => {
+    setRunStartedAt(state.activeGoalId ? Date.now() : null);
+    setRunEndedAt(null);
+  }, [state.activeGoalId]);
+  useEffect(() => {
+    if (state.working) {
+      setRunStartedAt((prev) => prev ?? Date.now());
+      setRunEndedAt(null);
+    } else {
+      setRunEndedAt((prev) => prev ?? (runStartedAt !== null ? Date.now() : null));
+    }
+    // runStartedAt is read, not tracked: this fires on the working edge by design.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.working]);
+
+  // This surface is EPHEMERAL (v4.1: Bixby opens it in a webview) and the cloud stops
+  // replaying `understanding` once a plan exists — see _replay_create_phase. The
+  // objective it carried is the only place the goal's words appear, so remember them
+  // per goal locally; otherwise a reopened webview shows a plan under a blank title.
+  useEffect(() => {
+    const goalId = state.activeGoalId;
+    if (!goalId) return;
+    const key = `goalflow:goal-text:${goalId}`;
+    try {
+      if (state.goalText) {
+        window.localStorage.setItem(key, state.goalText);
+        return;
+      }
+      const remembered = window.localStorage.getItem(key);
+      if (remembered) dispatch({ type: "goal_text_restored", goalId, text: remembered });
+    } catch {
+      // Private mode / storage disabled — the title just falls back. Not worth a crash.
+    }
+  }, [state.activeGoalId, state.goalText]);
+
   const selectDevice = (deviceId: string, explicit = true) => {
     if (explicit) {
       rememberDeviceId(deviceId); // only a real choice is worth remembering
@@ -977,7 +1090,6 @@ export default function App() {
     });
   };
 
-  const planPending = state.working && !state.plan;
   // Unbound = the cloud has no device to route our goal to yet; it would drop
   // the frame, so block the composer until a device is picked.
   const unbound = state.boundDeviceId === null && state.deviceChoices !== null;
@@ -1008,152 +1120,118 @@ export default function App() {
     : null;
   const latestNote = [...state.transcript].reverse().find((entry) => entry.kind === "note");
 
-  // v5: the pipeline used to be UNMOUNTED the instant `present_plan` landed — and the
-  // device sends plan_ready immediately after the Approval beat, so the last engines'
-  // resolved badges were yanked off screen before anyone could read them. Now the panel
-  // OUTLIVES the plan's arrival until the beat queue has drained, then collapses to a
-  // one-line "engines cleared" ribbon above the plan hero (the plan is still the hero;
-  // the harness just gets to finish its sentence).
+  // v5.1: the run column OUTLIVES the plan's arrival. The device sends plan_ready
+  // immediately after the Approval beat, so unmounting on `present_plan` yanked the last
+  // engines' verdicts off screen before anyone could read them. Once every beat has been
+  // shown the column stays, minus its focus card — the receipts ARE the record, so there
+  // is no separate collapsed ribbon any more.
   const harnessDraining = state.harness.queue.length > 0 || !state.harness.settled;
-  const showHarnessPanel =
+  const goalText =
+    [...state.transcript].reverse().find((entry) => entry.kind === "goal")?.text ?? state.goalText;
+  const enginesCleared = HARNESS_PIPELINE.filter((e) => {
+    if (e.id === "monitor_adapt") return false;
+    const s = state.harness.engines[e.id].status;
+    return s === "done" || s === "blocked";
+  }).length;
+  const engineTotal = HARNESS_PIPELINE.length - 1; // monitor_adapt is a board engine
+
+  const showRun =
+    !state.understanding && (harnessStarted(state.harness) || state.working || harnessDraining);
+  // Rows are still landing, or they have landed but the plan itself has not.
+  const formingPlan =
+    state.draftQueue.length > 0 || (state.plan === null && state.draftItems.length > 0);
+  const showOutcome =
     !state.understanding &&
-    (state.agentEntries.length > 0 || state.working || harnessDraining) &&
-    (!state.plan || harnessDraining);
-  const showHarnessRibbon =
-    !state.understanding && state.plan !== null && !harnessDraining && harnessStarted(state.harness);
+    (state.plan !== null || state.draftItems.length > 0 || state.draftQueue.length > 0);
+  // Hand the screen to the plan once the run has nothing left to say.
+  const runCompact = state.plan !== null && !harnessDraining && !formingPlan;
 
   return (
     <div className="app">
-      <header className="app-header">
-        <div>
-          <p className="eyebrow">GoalFlow</p>
-          <h1>Home agent</h1>
-          {/* TODO(M-impl): show active goal text / domain instead of static title */}
-        </div>
-        <div className="app-header__actions">
-          <label className="presenter-toggle">
-            <input
-              type="checkbox"
-              checked={theaterMode}
-              onChange={(event) => setTheaterMode(event.target.checked)}
-            />
-            Theater
-          </label>
-          <label className="presenter-toggle">
-            <input
-              type="checkbox"
-              checked={presenterMode}
-              onChange={(event) => setPresenterMode(event.target.checked)}
-            />
-            Show agent flow
-          </label>
-          <span className={`connection-dot connection-dot--${connection}`}>
-            {connection}
-          </span>
-        </div>
-      </header>
-
-      <ProgressRail phase={state.phase} />
+      <GoalBar
+        goal={goalText}
+        fallback={state.plan ? "Your plan" : "Waiting for a goal…"}
+        startedAt={runStartedAt}
+        endedAt={runEndedAt}
+        cleared={enginesCleared}
+        total={engineTotal}
+        deviceLabel={pairedDevice?.device_name ?? state.boundDeviceId}
+        connection={connection}
+        onChangeDevice={() => dispatch({ type: "open_picker" })}
+        theater={theaterMode}
+        onTheater={setTheaterMode}
+        presenter={presenterMode}
+        onPresenter={setPresenterMode}
+      />
 
       {/* v5 presenter theater: full-bleed harness pipeline for the stage. Replaces the
-          normal stage while the agent works; falls back to the stage otherwise. */}
+          normal column while the agent works; falls back to the column otherwise. */}
       {theaterMode &&
       !state.understanding &&
       (!state.plan || harnessDraining) &&
       (state.working || harnessDraining || state.harness.activeModule) ? (
-        <HarnessTheater
-          harness={state.harness}
-          goalText={[...state.transcript].reverse().find((t) => t.kind === "goal")?.text ?? ""}
-        />
+        <HarnessTheater harness={state.harness} goalText={goalText} />
       ) : (
-      <main className={presenterMode ? "stage stage--with-feed" : "stage"}>
-        <section className="stage__main">
-          {boundOfflineReconnecting ? (
-            <p className="device-offline-note" role="status" aria-live="polite">
-              Paired device offline — reconnecting…
-            </p>
-          ) : awaitingDevicePick ? (
-            <DevicePicker
-              devices={state.deviceChoices ?? []}
-              currentDeviceId={state.boundDeviceId}
-              onSelect={selectDevice}
-              onCancel={state.boundDeviceId ? () => dispatch({ type: "close_picker" }) : undefined}
-            />
-          ) : state.boundDeviceId ? (
-            <PairedBar
-              name={pairedDevice?.device_name || state.boundDeviceId}
-              onChange={() => dispatch({ type: "open_picker" })}
-            />
-          ) : null}
-
-          {latestNote && !state.activeGoalId && !state.working && !state.plan ? (
-            <p className="transcript-note">{latestNote.text}</p>
-          ) : null}
-
-          {state.understanding ? (
-            <UnderstandingCard
-              objective={state.understanding.payload.objective}
-              constraints={state.understanding.payload.knew}
-              thought={state.understanding.payload.thought}
-              onConfirm={() => sendUnderstanding(true)}
-              onDecline={() => sendUnderstanding(false)}
-            />
-          ) : null}
-
-          {/* The live status is for the WORKING phase; once the plan is the hero
-              it collapses (raw trail stays in presenter mode). v5: the Harness Pipeline
-              is the dominant region, the reasoning transcript slaved beside it. */}
-          {showHarnessPanel ? (
-            <div className="watch">
-              <HarnessPipeline harness={state.harness} />
-              <div className="watch__reasoning">
-                <AgentStream
-                  entries={state.agentEntries}
-                  active={state.working}
-                  phase={state.phase}
-                  planPending={planPending}
-                />
-              </div>
-            </div>
-          ) : null}
-
-          {/* ...and once it has finished, it stays as a one-line receipt. */}
-          {showHarnessRibbon ? <HarnessPipeline harness={state.harness} collapsed /> : null}
-
-          {planPending ? (
-            <>
-              {/* plan_progress drafts replace skeleton rows one by one */}
-              {state.draftItems.map((item, index) => (
-                <p key={index} className="draft-plan-item">
-                  {item.title}
-                </p>
-              ))}
-              <Skeleton
-                variant="plan-item"
-                count={Math.max(1, 4 - state.draftItems.length)}
+        <main className={presenterMode ? "column column--with-feed" : "column"}>
+          <div className="column__main">
+            {boundOfflineReconnecting ? (
+              <p className="device-offline-note" role="status" aria-live="polite">
+                Paired device offline — reconnecting…
+              </p>
+            ) : awaitingDevicePick ? (
+              <DevicePicker
+                devices={state.deviceChoices ?? []}
+                currentDeviceId={state.boundDeviceId}
+                onSelect={selectDevice}
+                onCancel={state.boundDeviceId ? () => dispatch({ type: "close_picker" }) : undefined}
               />
-            </>
-          ) : null}
+            ) : null}
 
-          {state.plan ? (
-            <PlanCard
-              plan={state.plan}
-              changedIds={state.changedPlanIds}
-              morphs={state.planMorphs}
-              morphSeq={state.morphSeq}
-              changedImpactLabels={state.changedImpactLabels}
-              proposalStatuses={state.proposalStatuses}
-              onDecide={(decisions) =>
-                sendDecisions(state.plan!.goal_id, state.plan!.correlation_id, decisions)
-              }
-            />
-          ) : null}
+            {latestNote && !state.activeGoalId && !state.working && !state.plan ? (
+              <p className="transcript-note">{latestNote.text}</p>
+            ) : null}
 
-          {state.ticks.length > 0 ? <StatusTimeline ticks={state.ticks} /> : null}
-        </section>
+            {state.understanding ? (
+              <UnderstandingCard
+                objective={state.understanding.payload.objective}
+                constraints={state.understanding.payload.knew}
+                thought={state.understanding.payload.thought}
+                onConfirm={() => sendUnderstanding(true)}
+                onDecline={() => sendUnderstanding(false)}
+              />
+            ) : null}
 
-        {presenterMode ? <PresenterFeed frames={state.frames} /> : null}
-      </main>
+            {showRun ? (
+              <WorkingColumn
+                harness={state.harness}
+                entries={state.agentEntries}
+                working={state.working}
+                phase={state.phase}
+                compact={runCompact}
+              />
+            ) : null}
+
+            {showOutcome ? (
+              <PlanColumn
+                drafts={state.draftItems}
+                forming={formingPlan}
+                plan={state.plan}
+                changedIds={state.changedPlanIds}
+                morphs={state.planMorphs}
+                morphSeq={state.morphSeq}
+                changedImpactLabels={state.changedImpactLabels}
+                proposalStatuses={state.proposalStatuses}
+                onDecide={(decisions) =>
+                  sendDecisions(state.plan!.goal_id, state.plan!.correlation_id, decisions)
+                }
+              />
+            ) : null}
+
+            {state.ticks.length > 0 ? <StatusTimeline ticks={state.ticks} /> : null}
+          </div>
+
+          {presenterMode ? <PresenterFeed frames={state.frames} /> : null}
+        </main>
       )}
 
       {state.approved ? (
