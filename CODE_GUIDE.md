@@ -31,14 +31,13 @@ src/
 ```
 App                        — socket + streaming state machine (one pure reducer) + stage
 ├── DevicePicker            — one-time device-agent picker while unbound (multi-session pairing)
-├── ProgressRail           — Interpreting → Grounding → Confirm → Planning → Checking → Approval → Monitoring
-├── stage
-│   ├── GoalComposer       — input row (inline in App.tsx) + MicButton (STT stub)
+├── GoalBar                — the goal as the title, run clock, engines-cleared hairline (v5.1)
+├── column
 │   ├── UnderstandingCard  — confirm-understanding gate: objective/constraints/thought; Confirm & plan / Decline
-│   ├── AgentStream        — live thinking ticker + tool-call chips
-│   ├── Skeleton           — shimmering plan silhouette while planning
-│   ├── PlanCard           — the generic plan hero
-│   │   └── ProposalList   — tiered approvals (auto / light / firm)
+│   ├── WorkingColumn      — receipts / focus card (transcript + tool chips INSIDE it) / ghosts, on one spine
+│   ├── PlanColumn         — rows landing into reserved slots, then the hero
+│   │   └── PlanCard       — the generic plan hero
+│   │       └── ProposalList — tiered approvals (auto / light / firm)
 │   ├── AdaptationCard     — the loud "caught a change" card
 │   └── StatusTimeline     — quiet sustain ticks while monitoring
 ├── EventStrip             — presenter-fired demo event chips (idle→firing→fired), when the plan has demo_events
@@ -116,14 +115,15 @@ lights "Interpreting" until the device's own phase events take over. Sending dec
 (`decisions_sent`) marks those proposals `pending` optimistically — they flip to `done` only
 when a later `status.payload.executed[]` entry confirms them.
 
-Stage layout logic (in `App`'s render): `awaitingDevicePick = boundDeviceId === null &&
-deviceChoices !== null` renders `DevicePicker` ahead of everything else and disables the goal
-composer — the cloud drops frames from an unbound UI, so nothing useful can happen yet.
-`UnderstandingCard` shows whenever `state.understanding`
-is set, ahead of everything else, and blocks the goal composer; `AgentStream` shows while there's
-no understanding gate or plan and the agent is working; `planPending = working && !plan` shows
-draft rows + `Skeleton` (count shrinks as drafts arrive: `max(1, 4 - drafts)`); `PlanCard`
-replaces both once `present_plan` lands. Below the stage: `EventStrip` renders when the plan
+Column layout logic (in `App`'s render): `awaitingDevicePick = boundDeviceId === null &&
+deviceChoices !== null` renders `DevicePicker` ahead of everything else — the cloud drops frames
+from an unbound UI, so nothing useful can happen yet. `UnderstandingCard` shows whenever
+`state.understanding` is set, ahead of everything else. `WorkingColumn` shows once any beat has
+fired and stays past `present_plan` until the beat queue drains, then keeps its receipts and
+shrinks (`run--compact`, applied whenever no focus card renders). `PlanColumn` shows the reveal
+(`formingPlan = draftQueue.length > 0 || (plan === null && draftItems.length > 0)`) and swaps to
+`PlanCard` when the queue drains — which is why `present_plan` must NOT clear the draft queue.
+Below the column: `EventStrip` renders when the plan
 carries `demo_events` (`hasEventStrip`), otherwise `DemoControls` renders once a plan exists
 (`hasDemoControls`) — the two are mutually exclusive per plan.
 
@@ -166,14 +166,23 @@ resulting `proposal`/`status` echoes `event_id` (top-level or `payload.event_id`
 proposal is what delivers the `status.updated_plan` / `changed_ids` that morph the plan card (see
 above). "Reset week" sends `control {command:"reset"}` and clears the strip client-side.
 
-## The rail (`ProgressRail` + `types/ui.ts`)
+## The working column (`WorkingColumn` + `types/ui.ts`)
 
-Seven steps in `RAIL_PHASES` (Interpreting, Grounding, **Confirm**, Planning, Checking, Approval,
-Monitoring). Driven by `agent_event:phase` while working, by the `understanding` frame (→
-`confirming`), and by `railPhaseFromStatus(task_status)` on `present_plan`/`proposal`/`status` —
-`executing`/`monitoring`/`adapting`/`done` all fold into **Monitoring**. Per-step states:
-`done` (check), `active` (`rail-pulse`, connector filling), `todo` (dim). `phase === null`
-(before the first goal) renders the rail idle/dimmed.
+One column for the passage of work: resolved engines collapse into 41px receipts (name ·
+verdict · measured duration), the running one holds the single focus card (with the live
+transcript and its tool chips inside it), the rest are ghosts. Height is conserved — a resolving
+engine costs a receipt row and the focus card, the only stretchy element, gives back exactly
+that, which is why the screen never scrolls. Between beats no engine is lit, so the card is
+borrowed by the next one up (`pending`) rather than vanishing.
+
+Durations are stamped in `enqueueHarness` at ARRIVAL, never at paint: paint is paced by
+`HARNESS_ACTIVE_FLOOR_MS`, so measuring at drain time would just report the floor back. Under
+`HARNESS_MIN_TIMED_MS` (100ms) no duration is printed at all — Safety / Task Manager / Approval
+resolve in the same millisecond they light up because their real work happened earlier, and
+"0.0s" would read as "did nothing".
+
+`RAIL_PHASES` / `railPhaseFromStatus` still drive the phase-derived status line inside the focus
+card (`lib/reasoning.ts`), but there is no longer a separate rail component.
 
 ## The hero (`PlanCard`)
 

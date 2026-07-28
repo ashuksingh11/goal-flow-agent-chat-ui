@@ -206,10 +206,20 @@ export interface AgentToolResultEvent extends AgentEventBase {
   payload: { module: string; function: string; summary: string };
 }
 
-/** A plan item has taken shape → replace one skeleton row with a draft row. */
+/** A plan item has taken shape → fill one reserved row. */
 export interface AgentPlanProgressEvent extends AgentEventBase {
   event: "plan_progress";
-  payload: { item: Partial<PlanItem> & Pick<PlanItem, "title"> };
+  payload: {
+    item: Partial<PlanItem> & Pick<PlanItem, "title">;
+    /**
+     * How many items the finished plan has (v5.1). The device composes in ONE
+     * non-streaming call and emits every item in a single loop, so the stream itself
+     * cannot tell you how many are still coming — with this a surface reserves exactly
+     * N rows up front, for a goal of any shape. Absent on pre-v5.1 devices: UNKNOWN,
+     * not zero.
+     */
+    total?: number;
+  };
 }
 
 /**

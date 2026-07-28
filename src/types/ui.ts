@@ -116,14 +116,80 @@ export interface HarnessEngineState {
   verdict?: string;
   /** Safety grade (A0/A1/A2/AX) on the safety engine. */
   grade?: string;
+  /**
+   * epoch-ms when this engine's `active` beat ARRIVED off the wire (not when it was
+   * painted). Paint is deliberately paced — see {@link HARNESS_ACTIVE_FLOOR_MS} — so
+   * timing read at drain time would report the floor back to us instead of the device's
+   * real work.
+   */
+  startedAt?: number;
+  /** Measured wall-clock between this engine's `active` and its resolve, in ms. */
+  ms?: number;
 }
+
+/**
+ * Below this, a receipt shows NO duration.
+ *
+ * Safety / Task Manager / Approval emit `active` and their resolve back-to-back because
+ * their real work happened earlier in the run (see {@link HARNESS_ACTIVE_FLOOR_MS}).
+ * Measured beat-to-beat that reads as ~0ms — printing "0.0s" next to an engine that did
+ * real work is a worse lie than printing nothing, so under the threshold we print
+ * nothing and let the verdict speak.
+ */
+export const HARNESS_MIN_TIMED_MS = 100;
+
+/** "0.3s" / "41.7s" — a receipt's measured duration, or null when it wasn't measurable. */
+export function formatEngineMs(ms: number | undefined): string | null {
+  if (ms == null || ms < HARNESS_MIN_TIMED_MS) return null;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** One `harness` beat off the wire, waiting its turn in the pacing queue. */
+export type HarnessBeat = AgentHarnessEvent["payload"];
 
 /** The whole pipeline: one cell per engine + which one currently holds the spotlight. */
 export interface HarnessState {
   engines: Record<HarnessModule, HarnessEngineState>;
   /** The engine currently `active` — the reasoning panel slaves to this. null = none. */
   activeModule: HarnessModule | null;
+  /**
+   * Beats accepted off the wire but not yet SHOWN — see {@link enqueueHarness}.
+   * Non-empty means the pipeline is still catching up on real beats, which is why
+   * App.tsx keeps the panel mounted past `present_plan` until this drains.
+   */
+  queue: readonly HarnessBeat[];
+  /** epoch-ms floor: the next queued beat must not be applied before this. */
+  holdUntil: number;
+  /**
+   * False from the first beat until the queue has drained AND the settle window has
+   * elapsed. Gates the COLLAPSE, so the last engine's resolved badge is read in the full
+   * panel rather than being swapped for the ribbon the instant it turns green.
+   */
+  settled: boolean;
 }
+
+/**
+ * How long an engine's `active` state is guaranteed to stay on screen before its
+ * resolve is allowed to land.
+ *
+ * WHY THIS EXISTS: Safety, Task Manager and Approval do their real work EARLIER than
+ * their beats (the safety filter vets each tool call during grounding/planning; the
+ * task DAG is decomposed before grounding; proposals are registered before the
+ * approval beat). So the device emits `active` and its resolve back-to-back with
+ * nothing in between but the optional presenter dwell — at the default
+ * HARNESS_DWELL_MS=0 that is the same millisecond, and those three engines flashed
+ * past unseen. This is a RENDER floor only: order and total latency stay exactly what
+ * the device reported, we just refuse to paint a state change faster than the eye can
+ * follow. Engines with real work between their beats (Grounding, Planner — tens of
+ * seconds) are never delayed, because their gap already exceeds the floor.
+ */
+export const HARNESS_ACTIVE_FLOOR_MS = 550;
+
+/** Smaller floor after a resolve, so a settled badge is seen before the next engine lights. */
+export const HARNESS_RESOLVE_STEP_MS = 150;
+
+/** How long the full panel lingers after the LAST beat resolves, before collapsing. */
+export const HARNESS_SETTLE_MS = 900;
 
 /** The engines in fire order, with display label + a dependency-free emoji glyph. */
 export const HARNESS_PIPELINE: readonly { id: HarnessModule; label: string; glyph: string }[] = [
@@ -148,14 +214,73 @@ function idleEngines(): Record<HarnessModule, HarnessEngineState> {
   ) as Record<HarnessModule, HarnessEngineState>;
 }
 
-export const INITIAL_HARNESS: HarnessState = { engines: idleEngines(), activeModule: null };
+export const INITIAL_HARNESS: HarnessState = {
+  engines: idleEngines(),
+  activeModule: null,
+  queue: [],
+  holdUntil: 0,
+  settled: true, // nothing has fired, so there is nothing to wait for
+};
+
+/**
+ * ACCEPT a beat off the wire: it joins the pacing queue, it does NOT light up yet.
+ * Called from the seq-deduped agent_event reducer, so ordering and drop semantics are
+ * unchanged — only the moment of PAINT moves. Unknown modules are dropped here (rather
+ * than queued and dropped later) so adding an engine device-side stays additive.
+ */
+export function enqueueHarness(
+  state: HarnessState,
+  payload: HarnessBeat,
+  now: number,
+): HarnessState {
+  if (!(payload.module in state.engines)) return state;
+  // Timing is stamped HERE, on arrival — the only place that sees the device's real
+  // cadence. Paint happens later and paced, so measuring there would just play the
+  // render floor back to us. `reduceHarness` carries these two fields forward.
+  const prev = state.engines[payload.module];
+  const entering = payload.status === "enter" || payload.status === "active";
+  const timed: HarnessEngineState = entering
+    ? { ...prev, startedAt: now, ms: undefined }
+    : prev.startedAt != null
+      ? { ...prev, ms: now - prev.startedAt }
+      : prev;
+  return {
+    ...state,
+    engines: { ...state.engines, [payload.module]: timed },
+    queue: [...state.queue, payload],
+    settled: false,
+  };
+}
+
+/**
+ * Apply the OLDEST queued beat and arm the floor for the next one. Driven by a timer in
+ * App.tsx, which re-arms itself while `queue` is non-empty. `now` is passed in to keep
+ * this pure and testable.
+ */
+export function drainHarness(state: HarnessState, now: number): HarnessState {
+  const [beat, ...rest] = state.queue;
+  if (!beat) return state;
+  const applied = reduceHarness(state, beat);
+  const floor =
+    rest.length === 0
+      ? HARNESS_SETTLE_MS // last beat — linger before collapsing
+      : applied.engines[beat.module].status === "active"
+        ? HARNESS_ACTIVE_FLOOR_MS
+        : HARNESS_RESOLVE_STEP_MS;
+  return { ...applied, queue: rest, holdUntil: now + floor };
+}
+
+/** The settle window has elapsed — the panel may now collapse to its ribbon. */
+export function settleHarness(state: HarnessState): HarnessState {
+  return state.settled ? state : { ...state, settled: true };
+}
 
 /**
  * Fold one `agent_event {harness}` beat into the pipeline. Last-write-wins per engine
  * (correct for a live view: a monitoring re-run legitimately re-lights an engine). An
  * unknown module is ignored so adding an engine device-side stays additive.
  */
-export function reduceHarness(state: HarnessState, payload: AgentHarnessEvent["payload"]): HarnessState {
+export function reduceHarness(state: HarnessState, payload: HarnessBeat): HarnessState {
   const { module, status, note, verdict, grade } = payload;
   if (!(module in state.engines)) return state;
 
@@ -175,6 +300,9 @@ export function reduceHarness(state: HarnessState, payload: AgentHarnessEvent["p
     note: note ?? prev.note,
     verdict: verdict ?? prev.verdict,
     grade: grade ?? prev.grade,
+    // Measured on arrival by enqueueHarness — carry it, never recompute here.
+    startedAt: prev.startedAt,
+    ms: prev.ms,
   };
 
   // The active engine is whichever one is currently lit; when it resolves, the
@@ -186,7 +314,15 @@ export function reduceHarness(state: HarnessState, payload: AgentHarnessEvent["p
         ? null
         : state.activeModule;
 
-  return { engines: { ...state.engines, [module]: cell }, activeModule };
+  return { ...state, engines: { ...state.engines, [module]: cell }, activeModule };
+}
+
+/** Has any engine fired this run? (false = nothing to show, pipeline stays hidden.) */
+export function harnessStarted(state: HarnessState): boolean {
+  return (
+    state.queue.length > 0 ||
+    HARNESS_PIPELINE.some((e) => state.engines[e.id].status !== "idle")
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -217,7 +353,21 @@ export interface DraftPlanItem {
   title: string;
   detail?: string;
   tags?: string[];
+  when?: string;
+  day?: number;
 }
+
+/**
+ * Gap between two plan rows landing in the outcome column.
+ *
+ * The planner is a SINGLE non-streaming call: the device gets the whole plan back at
+ * once and then emits `plan_progress` for every item in one tight loop (GoalAgent
+ * `foreach (var item in modelPlan.Plan)`), so all N arrive in the same millisecond.
+ * This paces the REVEAL only — same trick as the harness render floor. Nothing is
+ * invented and nothing is held back: every item shown has already cleared the safety
+ * gate, because plan_progress fires after the safety and approval beats.
+ */
+export const PLAN_ITEM_STEP_MS = 320;
 
 // ---------------------------------------------------------------------------
 // Event strip
