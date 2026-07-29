@@ -15,16 +15,28 @@
  * should have done.
  */
 
-import type { PlanKnew } from "../types/contract";
+import { useState } from "react";
+import type { PlanKnew, ProposedConstraint } from "../types/contract";
 import { knewValue } from "./PlanCard";
 
 export interface UnderstandingCardProps {
   objective: string;
   constraints: PlanKnew;
   thought: string;
-  onConfirm: () => void;
+  /** v6-M4: household rules the user just stated, offered for confirmation. */
+  proposed?: ProposedConstraint[];
+  /** v6-M4: this gate is only about the rules — no plan is coming. */
+  captureOnly?: boolean;
+  onConfirm: (acceptedConstraintIds: string[]) => void;
   onDecline: () => void;
   resolved?: "confirmed" | "declined";
+}
+
+/** How a proposed rule's value reads on a chip: ["no_dairy"] → "no dairy". */
+function proposedValue(value: unknown): string {
+  if (Array.isArray(value)) return value.map((v) => String(v).replace(/_/g, " ")).join(", ");
+  if (typeof value === "number") return `$${value}`;
+  return String(value ?? "").replace(/_/g, " ");
 }
 
 /** Icon + tone per constraint family. Keys are free-form, so this matches on substrings. */
@@ -52,6 +64,8 @@ export function UnderstandingCard({
   objective,
   constraints,
   thought,
+  proposed = [],
+  captureOnly = false,
   onConfirm,
   onDecline,
   resolved,
@@ -60,13 +74,21 @@ export function UnderstandingCard({
     .map(([key, value]) => [key, knewValue(value)] as const)
     .filter(([, text]) => text !== "");
 
+  // Ticked by default: the user just SAID this, so pre-selecting matches what they
+  // asked for and confirming is one click. It is still an explicit tick they can
+  // clear — a rule that will block a future plan should never be captured by
+  // silence, only by a yes the user can see and undo.
+  const [accepted, setAccepted] = useState<string[]>(() => proposed.map((p) => p.id));
+  const toggle = (id: string) =>
+    setAccepted((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
   return (
     <article
       className={resolved ? `confirm-card confirm-card--${resolved}` : "confirm-card"}
       aria-label="Confirm understanding"
     >
       <header className="confirm-card__head">
-        <span className="panel-eyebrow">Before I plan</span>
+        <span className="panel-eyebrow">{captureOnly ? "Something to remember" : "Before I plan"}</span>
         <h2 className="confirm-card__title">{objective}</h2>
       </header>
 
@@ -97,19 +119,59 @@ export function UnderstandingCard({
         </section>
       ) : null}
 
+      {proposed.length > 0 ? (
+        <section className="capture" aria-label="Rules to remember">
+          <header className="constraints__head">
+            <span className="panel-eyebrow">Remember for next time?</span>
+            <span className="panel-meta">{accepted.length} of {proposed.length}</span>
+          </header>
+          <ul className="capture__list">
+            {proposed.map((rule) => {
+              const on = accepted.includes(rule.id);
+              return (
+                <li key={rule.id} className={on ? "capture__item capture__item--on" : "capture__item"}>
+                  <label className="capture__label">
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      disabled={Boolean(resolved)}
+                      onChange={() => toggle(rule.id)}
+                    />
+                    <span className="capture__text">
+                      <strong>{rule.label || rule.kind.replace(/_/g, " ")}</strong>
+                      <span className="capture__value">{proposedValue(rule.value)}</span>
+                      {rule.quote ? <em className="capture__quote">“{rule.quote}”</em> : null}
+                    </span>
+                    {rule.enforcement === "hard" ? (
+                      <span className="capture__badge" title="A plan will be blocked if it breaks this">
+                        enforced
+                      </span>
+                    ) : null}
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
+
       {thought ? <p className="confirm-card__thought">{thought}</p> : null}
 
       {resolved ? (
         <p className="confirm-card__resolved">
-          {resolved === "confirmed" ? "Confirmed. Planning next." : "Declined."}
+          {resolved === "confirmed"
+            ? captureOnly
+              ? "Saved."
+              : "Confirmed. Planning next."
+            : "Declined."}
         </p>
       ) : (
         <div className="confirm-card__actions">
-          <button type="button" className="btn btn--primary" onClick={onConfirm}>
-            Confirm &amp; plan
+          <button type="button" className="btn btn--primary" onClick={() => onConfirm(accepted)}>
+            {captureOnly ? "Remember this" : "Confirm & plan"}
           </button>
           <button type="button" className="btn btn--quiet" onClick={onDecline}>
-            Decline
+            {captureOnly ? "Don't save" : "Decline"}
           </button>
         </div>
       )}

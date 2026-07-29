@@ -392,12 +392,34 @@ export interface UnderstandingPayload {
   knew: PlanKnew;
   /**
    * v6, ADDITIVE: the provenance behind the chips — one row per applied
-   * constraint. Optional because `knew` is unchanged: this UI may ignore it
-   * until the capture beat (v6-M4) gives it something to say.
+   * constraint.
    */
   constraints?: AppliedConstraint[];
+  /**
+   * v6-M4: household rules the user just STATED, offered for confirmation. The
+   * cloud proposes; only the ids sent back in `accepted_constraint_ids` are ever
+   * written — a model must not author the policy it is then checked against.
+   */
+  proposed_constraints?: ProposedConstraint[];
+  /** v6-M4: this gate is a capture, not a goal — no plan is coming. */
+  capture_only?: boolean;
   thought: string;
   time_window?: TimeWindow;
+}
+
+/** A household rule the cloud heard and is offering to remember (v6-M4). */
+export interface ProposedConstraint {
+  /** Proposal id, valid for this gate only — the stored id is minted on write. */
+  id: string;
+  kind: string;
+  value: unknown;
+  /** "hard" rules block a plan; "soft" ones only bias it. */
+  enforcement: "hard" | "soft";
+  label: string;
+  /** The user's own words, so they can see what was heard. */
+  quote?: string;
+  /** ISO date, when the user time-boxed it ("for two weeks"). */
+  expires_on?: string;
 }
 
 /** Where one applied constraint came from, and why it was picked for this goal. */
@@ -423,6 +445,11 @@ export interface Understanding {
 
 export interface UnderstandingResponsePayload {
   confirmed: boolean;
+  /**
+   * v6-M4: which proposed rules the user ticked. Absent or empty captures
+   * nothing — confirming the GOAL never silently confirms a rule with it.
+   */
+  accepted_constraint_ids?: string[];
 }
 
 export interface UnderstandingResponse {

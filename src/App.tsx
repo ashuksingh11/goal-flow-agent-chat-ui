@@ -1088,14 +1088,16 @@ export default function App() {
     });
   };
 
-  const sendUnderstanding = (confirmed: boolean) => {
+  const sendUnderstanding = (confirmed: boolean, acceptedConstraintIds: string[] = []) => {
     if (!state.understanding) return;
     const goalId = state.understanding.goal_id;
     dispatch({ type: "understanding_sent", goalId, confirmed });
     socketRef.current?.send({
       type: "understanding_response",
       goal_id: goalId,
-      payload: { confirmed },
+      // v6-M4: the ticked rules ride with the answer. Declining sends none — a
+      // household rule needs its own yes, never one inherited from the goal.
+      payload: { confirmed, accepted_constraint_ids: confirmed ? acceptedConstraintIds : [] },
     });
   };
 
@@ -1159,6 +1161,7 @@ export default function App() {
     <div className="app">
       <GoalBar
         goal={goalText}
+        eyebrow={state.understanding?.payload.capture_only ? "REMEMBERING" : undefined}
         fallback={state.plan ? "Your plan" : "Waiting for a goal…"}
         startedAt={runStartedAt}
         endedAt={runEndedAt}
@@ -1205,7 +1208,9 @@ export default function App() {
                 objective={state.understanding.payload.objective}
                 constraints={state.understanding.payload.knew}
                 thought={state.understanding.payload.thought}
-                onConfirm={() => sendUnderstanding(true)}
+                proposed={state.understanding.payload.proposed_constraints}
+                captureOnly={state.understanding.payload.capture_only}
+                onConfirm={(acceptedIds) => sendUnderstanding(true, acceptedIds)}
                 onDecline={() => sendUnderstanding(false)}
               />
             ) : null}
