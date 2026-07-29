@@ -35,7 +35,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { HARNESS_PIPELINE, formatEngineMs } from "../types/ui";
 import type { AgentStreamEntry, HarnessState } from "../types/ui";
-import { PLANNING_MESSAGES, PLANNING_ROTATE_MS, buildTranscript, lastSentence } from "../lib/reasoning";
+import {
+  PLANNING_MESSAGES,
+  PLANNING_ROTATE_MS,
+  buildTranscript,
+  buildTranscriptBlocks,
+  lastSentence,
+} from "../lib/reasoning";
 
 /** `monitor_adapt` is a BOARD engine — it never fires during goal creation. */
 const ENGINES = HARNESS_PIPELINE.filter((e) => e.id !== "monitor_adapt");
@@ -93,7 +99,13 @@ export function WorkingColumn({
   // words — but the whole run for "Show details", which is the record of the thinking and
   // must not reset every time the spotlight moves to the next engine.
   const transcript = buildTranscript(entries, active ?? undefined);
-  const fullTranscript = buildTranscript(entries);
+  // Memoized because the run clock re-renders this card ~10×/s and the cleaning pass
+  // walks the whole transcript character by character.
+  const blocks = useMemo(() => buildTranscriptBlocks(entries), [entries]);
+  // Cheap identity for "has anything been added": the effect below only needs to know
+  // that the text grew, not what it says.
+  const transcriptSize = blocks.reduce((n, b) => n + b.text.length, 0);
+  const activeSpoke = active !== null && blocks.some((b) => b.engine === active);
   const settling = !harness.settled; // beats still draining, or the settle window is open
   // `working` goes false the moment present_plan lands, which is BEFORE the last beats have
   // been read — the settle window keeps the card alive on its own, or Approval (always the
@@ -138,7 +150,7 @@ export function WorkingColumn({
     if (!el) return;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     el.scrollTo({ top: el.scrollHeight, behavior: reduced ? "auto" : "smooth" });
-  }, [fullTranscript]);
+  }, [transcriptSize]);
 
   const live = planning
     ? PLANNING_MESSAGES[rotation % PLANNING_MESSAGES.length]
@@ -251,16 +263,34 @@ export function WorkingColumn({
             <summary className="focus__summary">Show details</summary>
             <div className="focus__drawer">
               <div className="focus__transcript" ref={bodyRef} aria-label="Reasoning">
-                {fullTranscript ? (
-                  <>
-                    {fullTranscript}
-                    {working ? <span className="focus__caret" aria-hidden /> : null}
-                  </>
-                ) : (
+                {blocks.map((block, index) => (
+                  <section key={`${block.engine ?? "unattributed"}:${index}`} className="focus__block">
+                    <span className="panel-eyebrow focus__who">
+                      {ENGINES.find((e) => e.id === block.engine)?.label ?? "Agent"}
+                    </span>
+                    <p className="focus__said">
+                      {block.text}
+                      {working && index === blocks.length - 1 && block.engine === active ? (
+                        <span className="focus__caret" aria-hidden />
+                      ) : null}
+                    </p>
+                  </section>
+                ))}
+                {/* Silence is a fact about the engine, not a gap in the record — say so,
+                    or an engine that never narrates reads as a transcript that got cut. */}
+                {active !== null && !activeSpoke ? (
+                  <p className="focus__silent">
+                    <strong>{activeMeta?.label ?? "This engine"}</strong> ·{" "}
+                    {active === "planner"
+                      ? "composing in a single call — the model returns the finished plan rather than narrating its way there."
+                      : "working without narration; it reports a verdict rather than its reasoning."}
+                  </p>
+                ) : null}
+                {blocks.length === 0 && active === null ? (
                   <span className="focus__empty">
                     The agent's thinking will appear here as it works.
                   </span>
-                )}
+                ) : null}
               </div>
               <div className="focus__calls" aria-label="Capability calls">
                 <span className="panel-eyebrow">

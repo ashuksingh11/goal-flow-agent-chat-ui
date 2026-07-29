@@ -276,11 +276,24 @@
 .focus__transcript {
   max-height: 220px;
   overflow-y: auto;
-  white-space: pre-wrap;
   font-size: 0.88rem;
   line-height: 1.6;
   color: var(--ink-dim);
 }
+/* one block per engine that spoke — the label is what makes silence readable */
+.focus__block + .focus__block { margin-top: 0.75rem; }
+.focus__who { display: block; margin-bottom: 0.2rem; }
+/* pre-wrap belongs to the TEXT, not to the container: the container now holds elements,
+   and preserving whitespace around them turns the markup's own indentation into blank
+   lines that push later blocks out of the scroller. */
+.focus__said { margin: 0; white-space: pre-wrap; }
+.focus__silent {
+  margin: 0.75rem 0 0;
+  color: var(--ink-faint);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.focus__silent strong { color: var(--ink-dim); font-weight: 600; }
 .focus__caret {
   display: inline-block;
   width: 7px;
