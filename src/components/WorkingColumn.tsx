@@ -75,8 +75,11 @@ export function WorkingColumn({
     return s === "done" || s === "blocked";
   }).length;
 
-  // Per-engine, so a card never shows another engine's words.
+  // Per-engine for the LIVE line, so the card never captions one engine with another's
+  // words — but the whole run for "Show details", which is the record of the thinking and
+  // must not reset every time the spotlight moves to the next engine.
   const transcript = buildTranscript(entries, active ?? undefined);
+  const fullTranscript = buildTranscript(entries);
   const settling = !harness.settled; // beats still draining, or the settle window is open
   // `working` goes false the moment present_plan lands, which is BEFORE the last beats have
   // been read — the settle window keeps the card alive on its own, or Approval (always the
@@ -121,7 +124,7 @@ export function WorkingColumn({
     if (!el) return;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     el.scrollTo({ top: el.scrollHeight, behavior: reduced ? "auto" : "smooth" });
-  }, [transcript]);
+  }, [fullTranscript]);
 
   const live = planning
     ? PLANNING_MESSAGES[rotation % PLANNING_MESSAGES.length]
@@ -227,22 +230,31 @@ export function WorkingColumn({
 
           <details className="focus__details">
             <summary className="focus__summary">Show details</summary>
-            {transcript ? (
+            <div className="focus__drawer">
               <div className="focus__transcript" ref={bodyRef} aria-label="Reasoning">
-                {transcript}
-                <span className="focus__caret" aria-hidden />
+                {fullTranscript ? (
+                  <>
+                    {fullTranscript}
+                    {working ? <span className="focus__caret" aria-hidden /> : null}
+                  </>
+                ) : (
+                  <span className="focus__empty">
+                    The agent's thinking will appear here as it works.
+                  </span>
+                )}
               </div>
-            ) : null}
-            {chips.length > 0 ? (
               <div className="focus__calls" aria-label="Capability calls">
-                {chips.slice(-6).map((chip) => (
+                <span className="panel-eyebrow">
+                  {chips.length > 0 ? `${chips.length} tool calls` : "No tool calls yet"}
+                </span>
+                {chips.slice(-12).map((chip) => (
                   <span key={chip.id} className={`call call--${chip.state}`} title={chip.summary}>
-                    <span aria-hidden>{chip.state === "done" ? "✓" : "…"}</span>
+                    <span aria-hidden>{chip.state === "done" ? "✓ " : "… "}</span>
                     {chip.module} · {chip.fn}
                   </span>
                 ))}
               </div>
-            ) : null}
+            </div>
           </details>
         </article>
       ) : null}

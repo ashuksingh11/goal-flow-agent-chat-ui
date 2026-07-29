@@ -21,8 +21,11 @@
   --p-slow: 280ms;
 }
 
-/* The panel is a 760px column, wherever it is hosted (fridge, tablet, laptop). */
-.column__main { max-width: 760px; margin-inline: auto; width: 100%; }
+/* The panel is a ~760px column, wherever it is hosted (fridge, tablet, laptop webview,
+   a desktop browser). It never exceeds that — the design is a column, not a canvas — but
+   it shrinks all the way down, and the type scales with it rather than snapping at a
+   breakpoint. */
+.column__main { max-width: min(100%, 760px); margin-inline: auto; width: 100%; }
 
 /* ------------------------------ primitives ------------------------------ */
 
@@ -49,6 +52,17 @@
 }
 .btn:active:not(:disabled) { transform: scale(0.97); }
 .btn:disabled { opacity: 0.5; cursor: default; }
+/* styles.css gives every <button> a hover background; these are more specific so the
+   panel's buttons keep their own identity. Gated: touch fires hover on tap. */
+@media (hover: hover) and (pointer: fine) {
+  .btn--primary:hover:not(:disabled) { background: #3763d3; }
+  .btn--quiet:hover:not(:disabled) { background: var(--surface-2); }
+  .btn--include:hover:not(:disabled) { background: var(--warn-soft); }
+  .btn--included:hover:not(:disabled) { background: var(--warn); }
+  .day .day__row:hover { background: var(--surface-2); }
+  .approval__switch:hover { background: #fff; }
+  .approval--on .approval__switch:hover { background: var(--accent); }
+}
 .btn--primary { background: var(--accent); color: #fff; box-shadow: 0 6px 18px -4px rgba(63, 111, 232, 0.36); }
 .btn--quiet { background: transparent; color: var(--ink-dim); box-shadow: inset 0 0 0 1.5px var(--stroke); flex: 0 0 auto; }
 .btn--commit { width: 100%; margin-top: 0.35rem; }
@@ -86,7 +100,7 @@
 .confirm-card__head { display: flex; flex-direction: column; gap: 0.35rem; }
 .confirm-card__title {
   margin: 0;
-  font-size: 1.85rem;
+  font-size: clamp(1.45rem, 3.6vw, 1.85rem);
   font-weight: 700;
   line-height: 1.15;
   letter-spacing: -0.025em;   /* large text wants negative tracking */
@@ -109,10 +123,9 @@
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   gap: 0.75rem;
 }
-@media (max-width: 560px) { .constraints__grid { grid-template-columns: 1fr; } }
 
 .constraint {
   display: flex;
@@ -174,7 +187,8 @@
 .focus__title {
   margin: 0;
   flex: 1;
-  font-size: 1.6rem;
+  min-width: 0;
+  font-size: clamp(1.25rem, 3.2vw, 1.6rem);
   font-weight: 700;
   letter-spacing: -0.025em;
   line-height: 1.2;
@@ -234,8 +248,15 @@
 .focus__summary::-webkit-details-marker { display: none; }
 .focus__summary::before { content: "⌄ "; }
 .focus__details[open] .focus__summary::before { content: "⌃ "; }
+.focus__drawer {
+  margin-top: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  animation: panel-land 200ms var(--p-ease-out) both;
+}
+.focus__empty { color: var(--ink-faint); }
 .focus__transcript {
-  margin-top: 0.6rem;
   max-height: 220px;
   overflow-y: auto;
   white-space: pre-wrap;
@@ -252,7 +273,7 @@
   margin-left: 2px;
   animation: panel-blink 1s steps(2) infinite;
 }
-.focus__calls { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.6rem; }
+.focus__calls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
 .call {
   font-size: 0.75rem;
   padding: 0.25rem 0.55rem;
@@ -280,8 +301,11 @@
   content: "";
   position: absolute;
   left: 11px;
-  top: 39px;
-  bottom: -3px;
+  /* From the bottom of this dot to the top of the next one, whatever the row height is:
+     top/bottom percentages both resolve against the row, so the segment always meets its
+     neighbours instead of stopping short. */
+  top: calc(50% + 12px);
+  bottom: calc(-50% + 12px);
   width: 2px;
   background: var(--stroke);
   transform-origin: top;
@@ -323,7 +347,7 @@
   background: #fff;
 }
 
-.pipe-row__name { font-size: 1.1rem; font-weight: 500; letter-spacing: -0.01em; color: var(--ink); }
+.pipe-row__name { font-size: clamp(0.98rem, 2.2vw, 1.1rem); min-width: 0; overflow-wrap: anywhere; font-weight: 500; letter-spacing: -0.01em; color: var(--ink); }
 .pipe-row--queued .pipe-row__name { color: var(--ink-faint); }
 .pipe-row--active .pipe-row__name { color: var(--accent); font-weight: 600; }
 
@@ -385,7 +409,7 @@
 .drafts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .draft {
   display: grid;
-  grid-template-columns: 96px 1fr auto;
+  grid-template-columns: minmax(64px, 96px) 1fr auto;
   align-items: baseline;
   gap: 0.9rem;
   padding: 0.7rem 0;
@@ -427,7 +451,7 @@
 .result__mark--ok { background: var(--good); }
 .result__mark--blocked { background: var(--danger); }
 .result__titles { display: flex; flex-direction: column; gap: 0.15rem; }
-.result__title { margin: 0; font-size: 1.6rem; font-weight: 700; letter-spacing: -0.025em; line-height: 1.15; color: var(--ink); }
+.result__title { margin: 0; font-size: clamp(1.25rem, 3.2vw, 1.6rem); font-weight: 700; letter-spacing: -0.025em; line-height: 1.15; color: var(--ink); }
 .result__sub { margin: 0; font-size: 0.95rem; color: var(--ink-dim); }
 .result__badges { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; }
 
@@ -470,7 +494,7 @@
 .day__row {
   width: 100%;
   display: grid;
-  grid-template-columns: 96px 1fr auto auto;
+  grid-template-columns: minmax(64px, 96px) 1fr auto auto;
   align-items: center;
   gap: 0.9rem;
   padding: 0.7rem 0;
@@ -482,10 +506,10 @@
   font: inherit;
   transition: transform var(--p-press) var(--p-ease-out);
 }
-.day__row:active { transform: scale(0.995); }
+.day .day__row:active { transform: scale(0.995); }
 .day__when { font-size: 0.8rem; font-weight: 500; color: var(--ink-faint); }
 .day__titles { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
-.day__title { font-size: 1.1rem; font-weight: 600; letter-spacing: -0.015em; color: var(--ink); }
+.day__title { font-size: clamp(0.98rem, 2.2vw, 1.1rem); overflow-wrap: anywhere; font-weight: 600; letter-spacing: -0.015em; color: var(--ink); }
 .day__old { font-size: 0.78rem; color: var(--ink-faint); display: inline-flex; gap: 0.35rem; }
 .day__oldlabel, .day__newlabel {
   font-size: 0.62rem;
@@ -505,7 +529,7 @@
 .day__detail {
   display: grid;
   grid-template-rows: 0fr;
-  padding-left: 96px;
+  padding-left: clamp(0px, 8vw, 96px);
   transition: grid-template-rows var(--p-dur) var(--p-ease-in-out);
 }
 .day--open .day__detail { grid-template-rows: 1fr; }
