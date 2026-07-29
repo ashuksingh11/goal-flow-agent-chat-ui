@@ -52,6 +52,20 @@ export interface WorkingColumnProps {
   compact?: boolean;
 }
 
+/**
+ * One line's worth of the tail, for the collapsed card.
+ *
+ * `lastSentence` splits on . ! ? — and the device's narration frequently has NO sentence
+ * terminator at all (it separates steps with →), so it hands back the entire transcript.
+ * That turned the peek into a second, full-height copy of the drawer's content. Fall back
+ * to the last CLAUSE, and let the CSS ellipsis take it from there.
+ */
+function peek(text: string): string {
+  const tail = lastSentence(text).trim();
+  if (tail.length <= 110) return tail;
+  return tail.split(/\s*(?:→|;|\|)\s*/).filter(Boolean).pop() ?? tail;
+}
+
 /** A verdict that starts with a number ("18 tools") is a COUNT — a fact, not a judgement. */
 function badgeTone(verdict: string): "count" | "good" {
   return /^\d/.test(verdict) ? "count" : "good";
@@ -128,7 +142,9 @@ export function WorkingColumn({
 
   const live = planning
     ? PLANNING_MESSAGES[rotation % PLANNING_MESSAGES.length]
-    : lastSentence(transcript);
+    : peek(transcript);
+  // The drawer shows the same words in full — no reason to preview them at the same time.
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   const pipeline = (
     <ol className="pipe__list">
@@ -208,10 +224,10 @@ export function WorkingColumn({
             </p>
           ) : null}
 
-          {live ? (
-            <p className="focus__live" aria-live="polite">
+          {live && !detailsOpen ? (
+            <p className="focus__live" aria-live="polite" title={live}>
               <i className="focus__livedot" aria-hidden />
-              {live}
+              <span className="focus__livetext">{live}</span>
             </p>
           ) : null}
 
@@ -228,7 +244,10 @@ export function WorkingColumn({
             />
           </div>
 
-          <details className="focus__details">
+          <details
+            className="focus__details"
+            onToggle={(e) => setDetailsOpen((e.currentTarget as HTMLDetailsElement).open)}
+          >
             <summary className="focus__summary">Show details</summary>
             <div className="focus__drawer">
               <div className="focus__transcript" ref={bodyRef} aria-label="Reasoning">
