@@ -38,6 +38,15 @@
   padding-bottom: 1.5rem;
 }
 
+/* …and once it scrolls, nothing in it may be SQUEEZED. `.column__main` is a flex column
+   stretched to the viewport, so its cards are flex items that shrink by default — v5.1
+   relied on exactly that to conserve height without ever scrolling. With the run and the
+   plan on screen together they no longer fit, so the browser shrank each box below its
+   own content while the content itself (overflow: visible) kept painting: the cleared
+   pipeline drew straight through the plan card. Cards size to their content and the
+   column scrolls; that is the whole contract. */
+.column__main > * { flex: 0 0 auto; }
+
 /* ------------------------------ primitives ------------------------------ */
 
 .panel-eyebrow {
