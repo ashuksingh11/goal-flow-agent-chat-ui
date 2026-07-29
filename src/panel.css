@@ -27,6 +27,17 @@
    breakpoint. */
 .column__main { max-width: min(100%, 760px); margin-inline: auto; width: 100%; }
 
+/* v5.2 SCROLLS. styles.css pins the shell to 100dvh and hides overflow, because the
+   v5.1 run column conserved its height and genuinely never needed a scrollbar. The plan
+   card makes no such promise — seven steps plus the approvals exceed any viewport — and
+   a clipped "Approve & Save" is far worse than a scrollbar. Only the CONTENT scrolls:
+   the goal bar stays where it is, which is what the design shows. */
+.column {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 1.5rem;
+}
+
 /* ------------------------------ primitives ------------------------------ */
 
 .panel-eyebrow {
