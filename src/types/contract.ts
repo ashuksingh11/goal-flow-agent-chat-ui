@@ -127,8 +127,12 @@ export interface UserGoal {
 
 /**
  * constraints.hard is the ONLY block the deterministic Safety filter enforces
- * (allergens, medical, dietary, budget_cap, quiet_hours, …). Free-form by
- * design — the protocol stays domain-agnostic.
+ * (allergens, medical, dietary, budget_cap, quiet_hours, peak_hours,
+ * away_window, …). Free-form by design — the protocol stays domain-agnostic.
+ *
+ * v6: the cloud RESOLVES this per goal from the household constraint store, so
+ * the cap and window keys differ by domain (a vacation goal carries a travel cap
+ * and an away window) while allergens/dietary/medical are always the full set.
  */
 export interface DispatchConstraints {
   hard: Record<string, unknown>;
@@ -386,8 +390,26 @@ export interface UnderstandingPayload {
   domain: string;
   /** Display-ready hard-constraint chips, same shape as PresentPlan payload.knew. */
   knew: PlanKnew;
+  /**
+   * v6, ADDITIVE: the provenance behind the chips — one row per applied
+   * constraint. Optional because `knew` is unchanged: this UI may ignore it
+   * until the capture beat (v6-M4) gives it something to say.
+   */
+  constraints?: AppliedConstraint[];
   thought: string;
   time_window?: TimeWindow;
+}
+
+/** Where one applied constraint came from, and why it was picked for this goal. */
+export interface AppliedConstraint {
+  id: string;
+  label: string;
+  /** Already display-formatted by the cloud ("$1500", "21:30–07:00"). */
+  value: string;
+  enforcement: "hard" | "soft";
+  source: "account" | "derived" | "chat";
+  /** "always enforced" | "domain" | "household default" | "relevance" | "tagged" */
+  why: string;
 }
 
 export interface Understanding {
