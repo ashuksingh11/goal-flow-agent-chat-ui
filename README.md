@@ -1,68 +1,56 @@
 # goal-flow-agent-chat-ui
 
-Tablet UI for **GoalFlow v2** — the *general* goal-based agent for the Samsung Family Hub
-(see `../goal-flow-agents/docs/V2_DESIGN_PROPOSAL.md`). React + Vite + TypeScript, no other
+Tablet UI for **GoalFlow** — the general goal-based agent for the Samsung Family Hub
+(system design: `../goal-flow-agents/docs/DESIGN.md`). React + Vite + TypeScript, no other
 runtime dependencies (all motion is CSS keyframes/transitions — no motion library).
 
 This is not a chat transcript. It is a **"watch it think" stage**: you give the agent a goal
 and watch it work live, then the plan takes over the screen as the hero. The UI talks **only**
 to the cloud agent over a single WebSocket (the cloud is the hub; the UI never touches the
-device). The shared protocol is **CONTRACT v2**, canonical in the cloud repo and mirrored here
+device). The shared protocol is **`CONTRACT.md`**, canonical in the cloud repo and mirrored here
 as discriminated unions in [`src/types/contract.ts`](src/types/contract.ts).
 
-## What's on the stage (v2)
+## What's on the stage
 
 - **Device pairing** — the cloud is multi-session (many UIs + many device agents at once,
   paired by `device_id`). One device online ⇒ this UI auto-binds silently. Two or more
   (e.g. two developers sharing one cloud) ⇒ a one-time `DevicePicker` before anything else
   renders, remembered per browser (`localStorage`). `?device=<id>` in the URL overrides
-  pairing (scripted/CI runs). The goal composer is disabled until bound.
-- **Progress rail** — Interpreting → Grounding → Confirm → Planning → Checking → Approval →
-  Monitoring, driven live by streamed `agent_event {event:"phase"}` frames (the active step
-  pulses).
-- **Confirm-understanding gate (`UnderstandingCard`)** — before the device plans, the cloud
-  agent sends an `understanding` frame (objective / constraints / thought); the card renders it
-  and blocks on **Confirm & plan** / **Decline**, answered with `understanding_response`. Nothing
-  plans until the user confirms.
-- **Agent stream** — the live feed while the device works: a streaming **thinking ticker**
-  (reasoning fragments with a blinking caret) and **tool-call chips** that pop in as the LLM
-  calls real capability functions ("Inventory · GetExpiringItems …") and flip to ✓ + a one-line
-  summary when the `tool_result` lands.
-- **Skeleton loaders** — while planning, the plan's *silhouette* shimmers (never a spinner);
-  `plan_progress` events replace skeleton rows with real draft rows one by one.
-- **Plan hero (`PlanCard`)** — on `present_plan` the plan animates in and owns the stage:
-  the "Knew:" personalization chips, the safety gate chip ("LLM plans, code checks"),
-  generic plan items (title / detail / when / why / tags), and impact badges. It is
-  **domain-agnostic by construction** — the same component carries a meal week, a guest-dinner
-  prep timeline, or chores; domain flavor arrives purely as data.
+  pairing (scripted/CI runs).
+- **No composer.** Goal entry belongs to Bixby (the `input` surface); this UI is a webview
+  bracketed by `chat_ui_open` / `chat_ui_close` and never sends `user_goal`. Open on `chat_ui_open`
+  is a hard reset keyed to that goal, and the cloud replays the create phase to a freshly-bound
+  socket, so a late-connecting webview still shows the understanding it missed.
+- **Confirm-understanding gate (`UnderstandingCard`)** — before the device plans, the cloud sends
+  an `understanding` frame (objective / the constraints it will hold / a line of reasoning); the
+  card blocks on **Confirm & plan** / **Decline**. Nothing plans until the user confirms. When the
+  message stated a *household rule* rather than a goal, the same card becomes the **capture card**:
+  a tick per proposed rule, the user's own words quoted back, and nothing remembered that was not
+  ticked.
+- **The working column** — one column for the passage of work: engines that finished collapse into
+  receipts carrying their verdict and measured duration (`Grounding · grounded · 59.3s`), the one
+  running holds a focus card with the live reasoning transcript and its tool-call chips inside it,
+  and the rest wait below as ghosts. The page never scrolls.
+- **The plan, landing** — `plan_progress` rows arrive into slots reserved before the content does,
+  paced so the whole plan does not appear in a single frame, then the hero (`PlanCard`) takes over:
+  the "Knew" chips, the safety chip ("LLM plans, code checks"), generic plan items
+  (title / detail / when / why / tags) and impact badges. **Domain-agnostic by construction** — a
+  meal week, a vacation prep timeline and a party run the same component; domain flavour is data.
 - **Tiered HITL approvals (`ProposalList`)** — every proposed side effect carries a tier
   (reversibility × cost × risk): **auto** renders as already done (no buttons), **light** gets a
   single quiet OK, **firm** (spends money / irreversible) renders visually heavy with the exact
   `module.function` call spelled out and explicit Approve / Decline. Nothing above `auto`
-  executes until the approval frame returns.
-- **Adaptation card** — when the agent catches a material change mid-goal (a `proposal` frame,
-  `task_status:"adapting"`), a deliberately loud "Caught a change" card slides in — the one
-  glowing entrance, earned by the quiet sustain ticks around it (`StatusTimeline`).
-- **Event-driven meal week (`EventStrip`)** — when the plan carries `demo_events`, a strip of
-  day-labelled ("Day N") chips replaces the sim-clock's "Advance day" control: the presenter
-  fires an event (`control {command:"trigger_event", event_id}`) once the plan is approved, the
-  chip goes `idle → firing → fired` as the matching `proposal`/`status` echoes `event_id` back,
-  and approving the resulting adaptation morphs the changed day-row in place — the old dish
-  strikes through and the new one slides in.
-- **Demo controls (sim clock)** — the fallback for plans with no `demo_events`: a generic
-  simulated-clock strip with the current sim day/date and a 7-day week strip **derived from
-  `status.sim_date`** (real today before the first status — nothing hardcoded), plus Advance day
-  / Reset / Set date, which send `control` frames and re-render only when the device's status
-  echoes back.
+  executes until the approval frame returns — and a refusal comes back as `blocked_safety` with
+  the filter's reason, not as a silent success.
+- **Then it hands off.** Once the plan is approved a banner points at the Agent Board, which owns
+  the goal's life: monitoring, the world tick, and adaptation approvals.
 - **Presenter mode** — the header "Show agent flow" toggle reveals the raw WS frame feed
   (▲ sent / ▼ recv, type, terse label; high-volume `agent_event` thinking frames collapse into
   bursts). Off by default for a clean demo surface.
-- **Mic button** — speech-to-text stub (Web Speech API planned, browser-only).
 
 All inbound frames flow through **one pure reducer** in `App.tsx`; components stay
-presentational. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full spec (component
-tree, event→state mapping table, motion principles) and [`CODE_GUIDE.md`](CODE_GUIDE.md) for
-the code walkthrough.
+presentational. See [`CODE_GUIDE.md`](CODE_GUIDE.md) for the walkthrough — the component tree,
+the event→state mapping table and the motion rules all live there.
 
 ## How to run
 
@@ -113,28 +101,27 @@ Everything routes through the cloud; the UI and device never talk directly.
 ## Repo layout
 
 ```
-docs/ARCHITECTURE.md        # the v2 wow-UI spec: tree, event mapping, motion
 CODE_GUIDE.md               # code walkthrough (start here to hack on it)
 src/
   main.tsx                  # entry: StrictMode + ErrorBoundary + App
   App.tsx                   # socket + streaming reducer/state machine + stage layout
   lib/ws.ts                 # WS client: hello handshake, reconnect, frame validation
-  types/contract.ts         # TypeScript mirror of CONTRACT v2
-  types/ui.ts               # reducer output vocabulary (rail phases, chips, DemoClock…)
-  styles.css                # design tokens + all keyframes (CSS-only motion)
+  types/contract.ts         # TypeScript mirror of CONTRACT.md
+  types/ui.ts               # reducer output vocabulary (harness state, chips, receipts…)
+  styles.css                # design tokens (light theme) + the v5.1 keyframes
+  panel.css                 # the v5.2 panel: new class names only, loaded after styles.css
+  lib/reasoning.ts          # transcript assembly (lifted out of the old AgentStream)
   components/
-    ProgressRail.tsx        # seven-phase rail (incl. Confirm)
     DevicePicker.tsx        # one-time device-agent picker (multi-session pairing)
-    UnderstandingCard.tsx   # confirm-understanding gate (Confirm & plan / Decline)
-    AgentStream.tsx         # thinking ticker + tool-call chips
-    Skeleton.tsx            # shimmer placeholders (plan-item / line / chip)
+    GoalBar.tsx             # the goal as the page title, run clock, engines-cleared hairline
+    WorkingColumn.tsx       # receipts / the one focus card (transcript + chips) / ghosts
+    PlanColumn.tsx          # plan rows landing into reserved slots
     PlanCard.tsx            # the generic plan hero
     ProposalList.tsx        # tiered approvals (auto / light / firm)
-    AdaptationCard.tsx      # the loud "caught a change" card
+    UnderstandingCard.tsx   # the pre-planning gate; doubles as the capture card
     StatusTimeline.tsx      # quiet monitoring ticks
-    EventStrip.tsx          # presenter-fired demo event chips (meal week)
-    DemoControls.tsx        # generic sim clock + advance/reset/set-date (fallback, no demo_events)
+    HarnessTheater.tsx      # presenter mode: the projection-scale engine strip
     PresenterFeed.tsx       # raw WS frame feed ("Show agent flow")
-    MicButton.tsx           # STT stub
+    MicButton.tsx           # STT stub — orphaned since the composer was removed
     ErrorBoundary.tsx       # one bad frame never blanks the app
 ```
