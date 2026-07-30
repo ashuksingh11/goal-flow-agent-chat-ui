@@ -162,6 +162,15 @@ interface UiState {
   saving: { startedAt: number; detail: string | null } | null;
   /** A close that arrived before the saving dwell was up; applied when it expires. */
   pendingClose: string | null;
+  /**
+   * v7: a refusal, shown where every other answer is shown.
+   *
+   * Until v7 an out-of-scope goal never opened this surface at all — the cloud returned
+   * before the create bracket — so on the Hub the user asked the fridge for something and
+   * the fridge's screen showed nothing. A refusal is an answer. The cloud closes the
+   * bracket a few seconds later, so there is no dismiss button: nothing here needs doing.
+   */
+  declined: string | null;
   /** Sustain ticks for StatusTimeline (capped). */
   ticks: Status[];
   demoClock: DemoClock;
@@ -212,6 +221,7 @@ const INITIAL_STATE: UiState = {
   approved: false,
   saving: null,
   pendingClose: null,
+  declined: null,
   ticks: [],
   demoClock: INITIAL_DEMO_CLOCK,
   transcript: [],
@@ -504,6 +514,7 @@ function closeCreatePhase(state: UiState): UiState {
         lastSeq: 0,
     saving: null,
     pendingClose: null,
+    declined: null,
   };
 }
 
@@ -581,9 +592,10 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
           ? { ...withGoal, saving: { ...withGoal.saving, detail: message.message } }
           : withGoal;
       }
-      // Terminal, non-plan message (e.g. an out-of-scope decline). The goal
-      // never reached the device — clear the stage and surface the redirect as a
-      // prominent transcript note (activeGoalId=null lets the note render).
+      // Terminal, non-plan message. The goal never reached the device — clear the stage
+      // and show the refusal as the surface's whole content (v7). activeGoalId is KEPT so
+      // the cloud's timed close still matches this goal; the strict create-phase filter
+      // would otherwise drop it and the webview would hang on the refusal forever.
       return {
         ...withGoal,
         nextId: withGoal.nextId + 1,
@@ -591,7 +603,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
           ...withGoal.transcript,
           { kind: "note", id: withGoal.nextId, text: message.message },
         ],
-        activeGoalId: null,
+        declined: message.message,
         declinedGoalId: message.goal_id,
         understanding: null,
         goalText: "",
@@ -634,6 +646,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         ...state,
         activeGoalId: message.goal_id,
         declinedGoalId: null,
+        declined: null,
         understanding: null,
         goalText: "",
         phase: "interpreting",
@@ -1306,6 +1319,22 @@ export default function App() {
 
             {latestNote && !state.activeGoalId && !state.working && !state.plan ? (
               <p className="transcript-note">{latestNote.text}</p>
+            ) : null}
+
+            {/* v7 — THE REFUSAL, given a surface. Shown where every other answer is
+                shown, and with no dismiss button: the cloud closes the bracket a few
+                seconds later, and asking someone to acknowledge a "no" would be the
+                interface inventing work. */}
+            {state.declined ? (
+              <article className="declined" aria-label="Not something this home can do">
+                <header className="declined__head">
+                  <span className="declined__mark" aria-hidden>🤔</span>
+                  <h2 className="declined__title">That one isn't mine to take</h2>
+                </header>
+                {goalText ? <p className="declined__quote">“{goalText}”</p> : null}
+                <p className="declined__body">{state.declined}</p>
+                <p className="declined__foot">Nothing was created on your board.</p>
+              </article>
             ) : null}
 
             {state.understanding ? (
