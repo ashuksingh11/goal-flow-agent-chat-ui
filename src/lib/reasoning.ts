@@ -74,8 +74,21 @@ export function stripJsonBlobs(text: string): string {
     // left the card looking frozen, which reads as "the agent stopped thinking".
     // A marker naming what it gathered keeps the card alive and stays honest.
     if (end === -1) {
-      out = appendMarker(out, "⟨context · still arriving…⟩");
-      break; // unterminated: the rest is the blob, still streaming
+      // Unterminated — and two very different situations look identical here. Either the
+      // blob genuinely IS the tail (still streaming), or it was CUT OFF mid-flight and
+      // prose follows it: the grounding stream hit its budget deadline, or a transient
+      // provider error rolled the model history back (RunGroundingPassAsync) and the
+      // retry narrated afresh. Breaking out in that second case discarded the entire
+      // remainder of the run — the rest of grounding and every later engine with it, so
+      // the transcript ended permanently at "⟨context · still arriving…⟩".
+      const resume = resumeAfterBlob(text, i);
+      if (resume === -1) {
+        out = appendMarker(out, "⟨context · still arriving…⟩");
+        break; // unterminated AND last: the rest really is the blob, still streaming
+      }
+      out = appendMarker(out, "⟨context · partial⟩");
+      i = resume;
+      continue;
     }
     out = appendMarker(out, describeBlob(text.slice(i, end)));
     // The marker already ends the line; swallow the newline the blob was followed by so
@@ -137,6 +150,40 @@ function describeBlob(blob: string): string {
   return "⟨context⟩";
 }
 
+/**
+ * Where prose picks up again after a blob that never closed — or -1 if it never does,
+ * which is the one case where consuming to the end is right.
+ *
+ * A JSON region is recognisable line by line (structure characters, quoted keys, quoted
+ * or numeric values); the first line that is none of those — or a blank line, which is
+ * how a model separates a dump from what it says next — is where the reader's text
+ * resumes. Line-granular by necessity: a blob that never closes has no other end.
+ */
+function resumeAfterBlob(text: string, start: number): number {
+  // The blob's own first line holds the opening brace, so scanning starts at the next one.
+  let br = text.indexOf("\n", start);
+  while (br !== -1) {
+    const lineStart = br + 1;
+    const nextBr = text.indexOf("\n", lineStart);
+    const line = text.slice(lineStart, nextBr === -1 ? text.length : nextBr);
+    if (!continuesBlob(line)) return lineStart;
+    br = nextBr;
+  }
+  return -1;
+}
+
+/** Whether a line still belongs to the JSON dump rather than to the narration. */
+function continuesBlob(line: string): boolean {
+  const t = line.trim();
+  if (t === "") return false; // a paragraph break ends the dump
+  if (/^[{}[\],]/.test(t)) return true;
+  if (/^-?\d[\d.eE+-]*,?$/.test(t)) return true;
+  if (/^(?:true|false|null),?$/.test(t)) return true;
+  // A quoted key, or a line of quoted values — but NOT prose that merely opens with a
+  // quotation mark (`"That's odd," it said`), which ends on a word rather than a quote.
+  return t.startsWith('"') && (/"\s*:/.test(t) || /"[,\]}]?$/.test(t));
+}
+
 /** Index just past the JSON value opening at `start`, or -1 if it never closes. */
 function scanBalanced(text: string, start: number): number {
   let depth = 0;
@@ -181,6 +228,40 @@ export function buildTranscript(entries: AgentStreamEntry[], engine?: HarnessMod
       ? thinking
       : thinking.filter((e) => e.engine === engine || (!e.engine && engine === firstAttributed));
   return stripJsonBlobs(scoped.map((e) => e.text).join(""));
+}
+
+export interface TranscriptBlock {
+  engine: HarnessModule | null;
+  text: string;
+}
+
+/**
+ * The transcript split by the engine that produced it, in the order it arrived.
+ *
+ * The drawer used to render one fused block: every engine's words concatenated with no
+ * separator, so grounding's last line ran straight into whatever came next and there was
+ * no way to tell which engine had said anything. Blocks also make SILENCE legible — the
+ * planner deliberately never narrates (GoalAgent.ComposeModelPlanAsync keeps the raw plan
+ * JSON off the thinking channel), and an unlabelled transcript made that read as a clip.
+ *
+ * Cleaning is per block: a JSON blob only ever appears inside grounding's own text, so no
+ * blob is split across a block boundary.
+ */
+export function buildTranscriptBlocks(entries: AgentStreamEntry[]): TranscriptBlock[] {
+  const thinking = entries.filter(
+    (e): e is Extract<AgentStreamEntry, { kind: "thinking" }> => e.kind === "thinking",
+  );
+  const firstAttributed = thinking.find((e) => e.engine)?.engine ?? null;
+  const blocks: TranscriptBlock[] = [];
+  for (const entry of thinking) {
+    const engine = entry.engine ?? firstAttributed;
+    const last = blocks[blocks.length - 1];
+    if (last && last.engine === engine) last.text += entry.text;
+    else blocks.push({ engine, text: entry.text });
+  }
+  return blocks
+    .map((b) => ({ engine: b.engine, text: stripJsonBlobs(b.text) }))
+    .filter((b) => b.text !== "");
 }
 
 /** The most recent complete sentence — the one-line summary shown when collapsed. */

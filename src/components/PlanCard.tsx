@@ -1,27 +1,26 @@
 /**
- * PlanCard — the plan HERO. On present_plan it animates in (`card-enter`)
- * and owns the stage.
+ * PlanCard — the plan, once it has landed (v5.2 panel design, Pencil frame 3).
  *
- * DOMAIN-AGNOSTIC by construction: renders generic PlanItem rows
- * (title / detail / optional when / why bullets / tag pills) — the same
- * component carries meal days, guest-prep timeline steps, chores, anything.
- * No meal-specific fields anywhere.
+ * Anatomy, top to bottom:
+ *   ✓ Plan ready · 7 steps · 5 constraints honoured   ← the arrival
+ *   [Safety gate passed]  [Why this plan]              ← how it was checked
+ *   allergens peanuts · dietary no_pork · …            ← what it knew (credibility)
+ *   Mon, Jul 27  Chickpea Salad Bowl              ⌄    ← the plan itself, one row per
+ *      detail + why + tags (the open row)                step, first row open
+ *   [impact]                                            ← what it changes
+ *   ProposalList                                        ← what happens when you save
  *
- * Anatomy (top to bottom):
- * 1. "Knew:" line   — payload.knew rendered as compact key:value chips; the
- *                     credibility line ("evidence of understanding").
- * 2. Safety chip    — payload.safety: green "Safety ✓ passed" or red
- *                     "blocked" with violations ("LLM plans, code checks").
- * 3. Plan items     — staggered entrance, one row per PlanItem; `when`
- *                     renders as a relative/short local time, tags as pills.
- * 4. Impact badges  — payload.impact [{label, value}] as stat pills.
- * 5. ProposalList   — the tiered approvals (child component).
- * Explanation stays one collapsed line ("why this plan") — MINIMAL TEXT.
+ * DOMAIN-AGNOSTIC by construction: generic PlanItem rows (title / detail / why / tags /
+ * optional `when`) carry meal days, guest-prep steps, chores, anything. The left column is
+ * the item's `when` if it has one and its step number if it does not — never a weekday for
+ * a goal that has no days. No meal-specific field appears anywhere.
  *
+ * Only one row is open at a time: this panel has one screen's worth of height and no page
+ * scroll, so an accordion keeps the whole plan visible while still letting any single step
+ * be read in full.
  */
 
-import { useEffect, useMemo, useRef } from "react";
-import type { CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ApprovalDecision, PresentPlan } from "../types/contract";
 import type { ProposalStatusMap } from "../types/ui";
 import { formatWhen } from "../lib/date";
@@ -44,8 +43,8 @@ export interface PlanCardProps {
 }
 
 export function knewValue(value: unknown): string {
-  // Defensive: only render primitives / string lists — never a raw object
-  // (that would crash React). Objects/empties collapse to "".
+  // Defensive: only render primitives / string lists — never a raw object (that would
+  // crash React). Objects/empties collapse to "".
   if (Array.isArray(value)) return value.slice(0, 3).map(String).join(", ");
   if (value == null || typeof value === "object") return "";
   return String(value);
@@ -62,129 +61,150 @@ export function PlanCard({
 }: PlanCardProps) {
   const { payload } = plan;
   const changed = useMemo(() => new Set(changedIds), [changedIds]);
-  const changedImpact = useMemo(
-    () => new Set(changedImpactLabels),
-    [changedImpactLabels],
-  );
+  const changedImpact = useMemo(() => new Set(changedImpactLabels), [changedImpactLabels]);
   const firstChangedId = changedIds[0];
   const changedRowRef = useRef<HTMLLIElement | null>(null);
 
+  // The first step opens by default — the plan should be readable, not just listed.
+  const [openId, setOpenId] = useState<string | null>(payload.plan[0]?.id ?? null);
+
+  // An adaptation should open the row it changed: that is the row worth reading now.
   useEffect(() => {
-    if (morphSeq === 0 || !changedRowRef.current) return;
+    if (morphSeq === 0 || !firstChangedId) return;
+    setOpenId(firstChangedId);
+    if (!changedRowRef.current) return;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     changedRowRef.current.scrollIntoView({
       behavior: reducedMotion ? "auto" : "smooth",
       block: "center",
     });
-  }, [morphSeq]);
+  }, [morphSeq, firstChangedId]);
+
+  const knewChips = payload.knew
+    ? Object.entries(payload.knew)
+        .map(([key, value]) => [key, knewValue(value)] as const)
+        .filter(([, text]) => text !== "")
+    : [];
+  const passed = payload.safety.gate === "passed";
 
   return (
-    <article className="plan-card" aria-label="Proposed plan">
-      {payload.knew ? (
-        <p className="plan-card__knew">
-          <span className="eyebrow">Knew</span>
-          {Object.entries(payload.knew)
-            .map(([key, value]) => [key, knewValue(value)] as const)
-            .filter(([, text]) => text !== "")
-            .map(([key, text]) => (
-              <span key={key} className="knew-chip">
-                <strong>{key}</strong> {text}
-              </span>
-            ))}
-        </p>
-      ) : null}
+    <article className="result-card" aria-label="Proposed plan">
+      <header className="result__head">
+        <i className={`result__mark result__mark--${passed ? "ok" : "blocked"}`} aria-hidden>
+          {passed ? "✓" : "!"}
+        </i>
+        <div className="result__titles">
+          <h2 className="result__title">{passed ? "Plan ready" : "Plan blocked"}</h2>
+          <p className="result__sub">
+            {payload.plan.length} step{payload.plan.length === 1 ? "" : "s"}
+            {knewChips.length > 0 ? ` · ${knewChips.length} constraints honoured` : ""}
+          </p>
+        </div>
+      </header>
 
-      <div className="plan-card__meta">
+      <div className="result__badges">
         <span
-          className={`safety-chip safety-chip--${payload.safety.gate}`}
+          className={`safety-pill safety-pill--${payload.safety.gate}`}
           title={payload.safety.violations.join(", ")}
         >
-          Safety {payload.safety.gate === "passed" ? "✓ passed" : "blocked"}
+          {passed ? "✓ Safety gate passed" : `Blocked — ${payload.safety.violations.length} violation(s)`}
         </span>
         {payload.explanation ? (
-          <details className="plan-explanation">
-            <summary>Why this plan</summary>
-            <p>{payload.explanation}</p>
+          <details className="why-plan">
+            <summary className="why-plan__summary">Why this plan</summary>
+            <p className="why-plan__body">{payload.explanation}</p>
           </details>
         ) : null}
       </div>
 
-      <ol className="plan-items">
+      {knewChips.length > 0 ? (
+        <p className="knew" aria-label="What it knew">
+          {knewChips.map(([key, text]) => (
+            <span key={key} className="knew__pair">
+              <span className="knew__key">{key.replace(/[_-]+/g, " ")}</span>
+              <strong className="knew__value">{text}</strong>
+            </span>
+          ))}
+        </p>
+      ) : null}
+
+      <ol className="days">
         {payload.plan.map((item, index) => {
           const isChanged = changed.has(item.id);
           const morph = morphs[item.id];
-          const day = item.day || index + 1;
-          const when = formatWhen(item.when) ?? `Day ${day}`;
+          const open = openId === item.id;
+          const when = formatWhen(item.when) ?? `${String(index + 1).padStart(2, "0")}`;
 
           return (
             <li
               key={`${item.id}:${isChanged ? morphSeq : 0}`}
               ref={firstChangedId === item.id ? changedRowRef : undefined}
-              className={isChanged ? "plan-item plan-item--morph" : "plan-item"}
-              style={{ "--i": index } as CSSProperties}
+              className={`day${open ? " day--open" : ""}${isChanged ? " day--morph" : ""}`}
             >
-              <div className="plan-item__topline">
-                <div className="plan-item__title-stack">
-                  {/* Explicit "Cancelled → New" framing: the labels carry the
-                      story even when old and new titles are near-identical,
-                      and the cancelled line PERSISTS after the morph settles. */}
+              <button
+                type="button"
+                className="day__row"
+                aria-expanded={open}
+                onClick={() => setOpenId(open ? null : item.id)}
+              >
+                <span className="day__when">{when}</span>
+                <span className="day__titles">
+                  {/* Explicit "Cancelled → New" framing: the labels carry the story even
+                      when old and new titles are near-identical, and the cancelled line
+                      PERSISTS after the morph settles. */}
                   {morph ? (
-                    <span className="plan-item__old-line">
-                      <span className="plan-item__old-label">Cancelled</span>
-                      <s className="plan-item__old">{morph.prevTitle}</s>
+                    <span className="day__old">
+                      <span className="day__oldlabel">Cancelled</span>
+                      <s>{morph.prevTitle}</s>
                     </span>
                   ) : null}
-                  <strong className={morph ? "plan-item__title plan-item__title--in" : "plan-item__title"}>
-                    {morph ? <span className="plan-item__new-label">New</span> : null}
+                  <strong className="day__title">
+                    {morph ? <span className="day__newlabel">New</span> : null}
                     {item.title}
                   </strong>
+                </span>
+                {isChanged ? <span className="day__updated">Updated</span> : null}
+                <i className="day__chevron" aria-hidden />
+              </button>
+
+              {/* Stays mounted: the collapse animates the grid row track, so opening and
+                  closing is one interruptible transition instead of a mount. */}
+              <div className="day__detail" aria-hidden={!open}>
+                <div className="day__inner">
+                  {item.detail ? <p className="day__body">{item.detail}</p> : null}
+                  {item.why.length > 0 || item.tags.length > 0 ? (
+                    <div className="day__tags">
+                      {item.why.slice(0, 1).map((reason) => (
+                        <span key={reason} className="tag tag--why">
+                          {reason}
+                        </span>
+                      ))}
+                      {item.tags.slice(0, 4).map((tag) => (
+                        <span key={tag} className="tag">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
-                {isChanged ? (
-                  <span className="plan-item__updated-badge">Updated</span>
-                ) : null}
-                <span className="plan-item__when">{when}</span>
-              </div>
-              <span className={morph ? "plan-item__detail plan-item__detail--in" : "plan-item__detail"}>
-                {item.detail}
-              </span>
-              <div className="plan-item__footer">
-                {item.why.length > 0 ? (
-                  <details className="why-popover">
-                    <summary>{item.why[0]}</summary>
-                    {item.why.length > 1 ? (
-                      <ul>
-                        {item.why.slice(1, 4).map((reason) => (
-                          <li key={reason}>{reason}</li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </details>
-                ) : null}
-                {item.tags.length > 0 ? (
-                  <div className="tag-row" aria-label="Tags">
-                    {item.tags.slice(0, 4).map((tag) => (
-                      <span key={tag} className="tag-chip">
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
               </div>
             </li>
           );
         })}
       </ol>
 
-      <div className="impact-badges">
-        {payload.impact.map((badge) => (
-          <span
-            key={`${badge.label}:${changedImpact.has(badge.label) ? morphSeq : 0}`}
-            className={changedImpact.has(badge.label) ? "impact-badge impact-badge--tick" : "impact-badge"}
-          >
-            <strong>{badge.value}</strong> {badge.label}
-          </span>
-        ))}
-      </div>
+      {payload.impact.length > 0 ? (
+        <p className="impact" aria-label="Impact">
+          {payload.impact.map((badge) => (
+            <span
+              key={`${badge.label}:${changedImpact.has(badge.label) ? morphSeq : 0}`}
+              className={changedImpact.has(badge.label) ? "impact__item impact__item--tick" : "impact__item"}
+            >
+              <strong>{badge.value}</strong> {badge.label}
+            </span>
+          ))}
+        </p>
+      ) : null}
 
       <ProposalList
         proposals={payload.proposals}

@@ -1,37 +1,47 @@
 /**
- * WorkingColumn — the run, as one column (v5.1, Pencil "Option E").
+ * WorkingColumn — the run (v5.2 panel design, Pencil frame 2).
  *
- * Replaces the old side-by-side pipeline + reasoning panel. There is exactly ONE thing
- * in focus at a time; everything above it is a receipt, everything below is a ghost,
- * and all of it hangs off a single spine:
+ * Two parts, in this order:
  *
- *   ✓ Pre-Check Engine        intent clear      0.3s   ← receipt (resolved, permanent)
- *   ✓ Grounding               12 facts          6.1s
- *   ● Safety Policy Engine ─────────────────────────┐  ← focus card, and the live
- *     │ transcript + the tool calls it is making    │    transcript lives INSIDE it
- *   ○ Task Manager            queued                    ← ghost (not yet run)
+ *   ┌ Composing your plan…                              41s ┐   ← the focus card
+ *   │ Grounding · assembling real-world context             │     (one live region)
+ *   │ • finalizing the shortlist…                           │
+ *   │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁                        │
+ *   └ ⌄ Show details                                        ┘
  *
- * Two properties fall out of this shape:
+ *   PIPELINE                             3 of 7 engines cleared
+ *   ✓ Pre-Check Engine                            intent clear
+ *   ✓ Capability Manager                              18 tools
+ *   ● Planner                                         working…
+ *   ○ Safety Policy Engine                              queued
  *
- * 1. IT CANNOT SCROLL. Height is conserved — each engine that resolves adds a fixed
- *    receipt row and the focus card (the only variable-height element) gives back
- *    exactly that much. The column's total height is invariant from first beat to last.
+ * Why this shape rather than v5.1's receipts-with-an-inline-focus-card: the pipeline is
+ * the thing the demo exists to show, so it gets to be a stable, always-complete list —
+ * seven rows from the first frame to the last, each one resolving in place. Nothing is
+ * added or removed as the run proceeds, so the column's height is conserved by
+ * construction and the tail engines (Safety / Task Manager / Approval, which resolve in
+ * the same millisecond they light up — see types/ui.ts) leave a permanent verdict behind
+ * instead of a blink.
  *
- * 2. THE TAIL STOPS FLASHING PAST. Safety / Task Manager / Approval resolve in the same
- *    millisecond they light up (their real work happens earlier in the run), and in the
- *    old row-per-engine panel that was a blink. Here a 12ms engine still leaves a
- *    permanent receipt line carrying its verdict. The render floor in types/ui.ts is
- *    now polish rather than the only thing making those engines visible.
+ * Colour carries state: GREEN = cleared, ACCENT = happening now, grey = not yet. Accent
+ * appears exactly once per frame, on the engine currently working, which is the thing
+ * worth watching.
  *
- * The transcript belongs to the engine that produced it — proximity is the label, so
- * nobody has to work out which engine "said" this.
+ * The transcript lives behind "Show details" — it is evidence, not the headline, and at
+ * 60-90s of streaming it would otherwise dominate a panel whose job is to show progress.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { HARNESS_PIPELINE, formatEngineMs } from "../types/ui";
 import type { AgentStreamEntry, HarnessState } from "../types/ui";
-import { PLANNING_MESSAGES, PLANNING_ROTATE_MS, buildTranscript } from "../lib/reasoning";
+import {
+  PLANNING_MESSAGES,
+  PLANNING_ROTATE_MS,
+  buildTranscript,
+  buildTranscriptBlocks,
+  lastSentence,
+} from "../lib/reasoning";
 
 /** `monitor_adapt` is a BOARD engine — it never fires during goal creation. */
 const ENGINES = HARNESS_PIPELINE.filter((e) => e.id !== "monitor_adapt");
@@ -41,10 +51,30 @@ export interface WorkingColumnProps {
   entries: AgentStreamEntry[];
   working: boolean;
   /**
-   * The run is over and the plan is the hero: drop the focus card and keep the
-   * receipts. The column shrinks, the outcome below grows — height still conserved.
+   * The run is over and the plan is the hero: the pipeline folds into a single cleared
+   * bar that can be opened again. The receipts stay reachable without competing with the
+   * plan for the screen.
    */
   compact?: boolean;
+}
+
+/**
+ * One line's worth of the tail, for the collapsed card.
+ *
+ * `lastSentence` splits on . ! ? — and the device's narration frequently has NO sentence
+ * terminator at all (it separates steps with →), so it hands back the entire transcript.
+ * That turned the peek into a second, full-height copy of the drawer's content. Fall back
+ * to the last CLAUSE, and let the CSS ellipsis take it from there.
+ */
+function peek(text: string): string {
+  const tail = lastSentence(text).trim();
+  if (tail.length <= 110) return tail;
+  return tail.split(/\s*(?:→|;|\|)\s*/).filter(Boolean).pop() ?? tail;
+}
+
+/** A verdict that starts with a number ("18 tools") is a COUNT — a fact, not a judgement. */
+function badgeTone(verdict: string): "count" | "good" {
+  return /^\d/.test(verdict) ? "count" : "good";
 }
 
 export function WorkingColumn({
@@ -55,6 +85,7 @@ export function WorkingColumn({
 }: WorkingColumnProps) {
   const active = harness.activeModule;
   const activeCell = active ? harness.engines[active] : null;
+  const activeMeta = active ? ENGINES.find((e) => e.id === active) ?? null : null;
 
   const chips = entries.filter(
     (e): e is Extract<AgentStreamEntry, { kind: "chip" }> => e.kind === "chip",
@@ -64,62 +95,25 @@ export function WorkingColumn({
     return s === "done" || s === "blocked";
   }).length;
 
-  // Per-engine, so a card never shows another engine's words.
+  // Per-engine for the LIVE line, so the card never captions one engine with another's
+  // words — but the whole run for "Show details", which is the record of the thinking and
+  // must not reset every time the spotlight moves to the next engine.
   const transcript = buildTranscript(entries, active ?? undefined);
+  // Memoized because the run clock re-renders this card ~10×/s and the cleaning pass
+  // walks the whole transcript character by character.
+  const blocks = useMemo(() => buildTranscriptBlocks(entries), [entries]);
+  // Cheap identity for "has anything been added": the effect below only needs to know
+  // that the text grew, not what it says.
+  const transcriptSize = blocks.reduce((n, b) => n + b.text.length, 0);
+  const activeSpoke = active !== null && blocks.some((b) => b.engine === active);
   const settling = !harness.settled; // beats still draining, or the settle window is open
-  // `working` goes false the moment present_plan lands, which is BEFORE the last beats
-  // have been read — so the settle window has to keep the card alive on its own, or
-  // Approval (always the last engine) is torn down within a frame of resolving.
+  // `working` goes false the moment present_plan lands, which is BEFORE the last beats have
+  // been read — the settle window keeps the card alive on its own, or Approval (always the
+  // last engine) is torn down within a frame of resolving.
   const showFocus = !compact && (working || active !== null || settling);
 
-  /**
-   * Which engine holds the focus card. Normally the active one — but between beats
-   * there is no active engine at all (the device resolves one and lights the next a
-   * beat later, and the render floor widens that gap deliberately). Handing the card to
-   * the next unresolved engine keeps it on screen through those gaps: without this the
-   * column loses its only variable-height element for a second and everything below it
-   * jumps. `pending` marks that borrowed state so it doesn't claim to be working.
-   */
-  const lastFired =
-    [...ENGINES].reverse().find((e) => harness.engines[e.id].status !== "idle")?.id ?? null;
-  const focusId = !showFocus
-    ? null
-    : (active ??
-      ENGINES.find((e) => harness.engines[e.id].status === "idle")?.id ??
-      // Everything has resolved: the LAST engine keeps the card through the settle window
-      // rather than having it yanked the millisecond it finishes. Approval is always the
-      // one this happens to, and measured at 57 ms it was effectively never seen.
-      (settling ? lastFired : null));
-  /** How the card is being held: by its own running engine, ahead of it, or after it. */
-  const focusHold: "working" | "pending" | "settled" =
-    focusId === null || focusId === active
-      ? "working"
-      : harness.engines[focusId].status === "idle"
-        ? "pending"
-        : "settled";
-  const pending = focusHold !== "working";
-  /**
-   * Whether a focus card will actually render. It is the column's only stretchy
-   * element, so with no card there is nothing to absorb slack — the column has to stop
-   * claiming the space and hand it to the outcome below. (Without this the run kept its
-   * full height while the plan was landing, leaving ~800px of white under the receipts.)
-   */
-  const hasFocus = showFocus && focusId !== null;
-
-  // The transcript follows its own tail as it streams.
-  const bodyRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const el = bodyRef.current;
-    if (!el) return;
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    el.scrollTo({ top: el.scrollHeight, behavior: reduced ? "auto" : "smooth" });
-  }, [transcript]);
-
-  // Planning is one silent ~60-90s call — rotate a line so the card isn't frozen. Keyed
-  // to the ENGINE holding the card, not to `phase`: phase frames are not paced, so by the
-  // time Grounding is painted the phase has usually moved to planning and the card would
-  // caption Grounding with the planner's words.
-  const planning = focusId === "planner" && working;
+  // Planning is one silent ~60-90s call — rotate a line so the card isn't frozen.
+  const planning = active === "planner" && working;
   const [rotation, setRotation] = useState(0);
   useEffect(() => {
     if (!planning) {
@@ -130,142 +124,200 @@ export function WorkingColumn({
     return () => window.clearInterval(id);
   }, [planning]);
 
-  // The focus card's own live clock, off the beat's ARRIVAL time (types/ui.ts stamps it
-  // on the wire, not at paint, so this is the device's real elapsed — not our floor).
-  const startedAt = activeCell?.startedAt ?? null;
+  /**
+   * Run elapsed, off the earliest beat ARRIVAL (types/ui.ts stamps it on the wire, not at
+   * paint) — so this is the device's real elapsed, not our render floor. It is the run's
+   * clock, not the engine's: it matches the "composed in Ns" the plan reports afterwards.
+   */
+  const runStartedAt = useMemo(() => {
+    const stamps = ENGINES.map((e) => harness.engines[e.id].startedAt).filter(
+      (t): t is number => typeof t === "number",
+    );
+    return stamps.length > 0 ? Math.min(...stamps) : null;
+  }, [harness.engines]);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (startedAt === null) return;
+    if (runStartedAt === null || !showFocus) return;
     setNow(Date.now());
     const id = window.setInterval(() => setNow(Date.now()), 100);
     return () => window.clearInterval(id);
-  }, [startedAt]);
+  }, [runStartedAt, showFocus]);
+
+  // The transcript follows its own tail as it streams (only when opened).
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollTo({ top: el.scrollHeight, behavior: reduced ? "auto" : "smooth" });
+  }, [transcriptSize]);
+
+  const live = planning
+    ? PLANNING_MESSAGES[rotation % PLANNING_MESSAGES.length]
+    : peek(transcript);
+  // The drawer shows the same words in full — no reason to preview them at the same time.
+  const [detailsOpen, setDetailsOpen] = useState(false);
+
+  const pipeline = (
+    <ol className="pipe__list">
+      {ENGINES.map((engine) => {
+        const cell = harness.engines[engine.id];
+        const resolved = cell.status === "done" || cell.status === "blocked";
+        const blocked = cell.status === "blocked";
+        const state = blocked ? "blocked" : resolved ? "done" : cell.status === "active" ? "active" : "queued";
+        const verdict = cell.verdict ?? (blocked ? "blocked" : "done");
+        const ms = formatEngineMs(cell.ms);
+
+        return (
+          <li key={engine.id} className={`pipe-row pipe-row--${state}`}>
+            <i className="pipe-dot" aria-hidden>
+              {resolved ? (blocked ? "!" : "✓") : null}
+            </i>
+            <span className="pipe-row__name">{engine.label}</span>
+            {resolved ? (
+              <span className="pipe-row__end">
+                {/* No duration rather than a dishonest 0.0s — see HARNESS_MIN_TIMED_MS. */}
+                {ms ? <span className="pipe-row__ms">{ms}</span> : null}
+                <span className={`pipe-badge pipe-badge--${blocked ? "blocked" : badgeTone(verdict)}`}>
+                  {verdict}
+                </span>
+              </span>
+            ) : state === "active" ? (
+              <span className="pipe-row__working">
+                <i className="pipe-row__pulse" aria-hidden />
+                working…
+              </span>
+            ) : (
+              <span className="pipe-row__queued">queued</span>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+
+  if (compact) {
+    return (
+      <section className="run run--compact" aria-label="Harness run">
+        <details className="pipe-collapsed">
+          <summary className="pipe-collapsed__bar">
+            <i className="pipe-collapsed__mark" aria-hidden>
+              ✓
+            </i>
+            <span className="pipe-collapsed__label">
+              Pipeline · all {cleared} engines cleared
+            </span>
+            <span className="pipe-collapsed__chevron" aria-hidden />
+          </summary>
+          <div className="pipe pipe--inset">{pipeline}</div>
+        </details>
+      </section>
+    );
+  }
 
   return (
-    <section className={hasFocus ? "run" : "run run--compact"} aria-label="Harness run">
-      <header className="run__head">
-        <span className="run__eyebrow">THE HARNESS, RUNNING</span>
-        <span className="run__meta">
-          {cleared} of {ENGINES.length} engines
-          {chips.length > 0 ? ` · ${chips.length} tool calls` : ""}
-        </span>
-      </header>
+    <section className="run" aria-label="Harness run">
+      {showFocus ? (
+        <article className="focus">
+          <header className="focus__head">
+            <i className="focus__spinner" aria-hidden />
+            <h2 className="focus__title">
+              {working ? "Composing your plan…" : "Wrapping up…"}
+            </h2>
+            {runStartedAt !== null ? (
+              <span className="focus__elapsed">{Math.round((now - runStartedAt) / 1000)}s</span>
+            ) : null}
+          </header>
 
-      <ol className="run__list">
-        {ENGINES.map((engine) => {
-          const cell = harness.engines[engine.id];
+          {activeMeta ? (
+            <p className="focus__phase">
+              <strong>{activeMeta.label}</strong>
+              {activeCell?.note ? <span> · {activeCell.note}</span> : null}
+            </p>
+          ) : null}
 
-          if (cell.status === "done" || cell.status === "blocked") {
-            const blocked = cell.status === "blocked";
-            const ms = formatEngineMs(cell.ms);
-            return (
-              <li key={engine.id} className={`run-row run-row--${blocked ? "blocked" : "done"}`}>
-                <i className="run-dot" aria-hidden>
-                  {blocked ? "!" : "✓"}
-                </i>
-                <span className="run-row__name">{engine.label}</span>
-                <span className="run-row__verdict">{cell.verdict ?? (blocked ? "blocked" : "done")}</span>
-                {/* No duration rather than a dishonest 0.0s — see HARNESS_MIN_TIMED_MS. */}
-                <span className="run-row__ms">{ms ?? ""}</span>
-              </li>
-            );
-          }
+          {live && !detailsOpen ? (
+            <p className="focus__live" aria-live="polite" title={live}>
+              <i className="focus__livedot" aria-hidden />
+              <span className="focus__livetext">{live}</span>
+            </p>
+          ) : null}
 
-          if (engine.id === focusId && showFocus) {
-            return (
-              <li key={engine.id} className="run-row run-row--focus">
-                <i
-                  className={
-                    focusHold === "working"
-                      ? "run-dot run-dot--live"
-                      : focusHold === "settled"
-                        ? "run-dot"
-                        : "run-dot run-dot--ghost"
-                  }
-                  aria-hidden
-                >
-                  {focusHold === "settled" ? "✓" : null}
-                </i>
-                <article
-                  className={
-                    focusHold === "working"
-                      ? "focus"
-                      : focusHold === "settled"
-                        ? "focus focus--settled"
-                        : "focus focus--pending"
-                  }
-                >
-                  <header className="focus__head">
-                    <span className="focus__tile" aria-hidden>
-                      {engine.glyph}
+          <div
+            className="focus__track"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={ENGINES.length}
+            aria-valuenow={cleared}
+          >
+            <span
+              className="focus__fill"
+              style={{ width: `${(cleared / ENGINES.length) * 100}%` }}
+            />
+          </div>
+
+          <details
+            className="focus__details"
+            onToggle={(e) => setDetailsOpen((e.currentTarget as HTMLDetailsElement).open)}
+          >
+            <summary className="focus__summary">Show details</summary>
+            <div className="focus__drawer">
+              <div className="focus__transcript" ref={bodyRef} aria-label="Reasoning">
+                {blocks.map((block, index) => (
+                  <section key={`${block.engine ?? "unattributed"}:${index}`} className="focus__block">
+                    <span className="panel-eyebrow focus__who">
+                      {ENGINES.find((e) => e.id === block.engine)?.label ?? "Agent"}
                     </span>
-                    <span className="focus__names">
-                      <strong className="focus__name">{engine.label}</strong>
-                      <span className="focus__sub">
-                        {focusHold === "pending"
-                          ? "up next"
-                          : focusHold === "settled"
-                            ? (cell.verdict ?? "done")
-                            : "working"}
-                        {focusHold === "working" && startedAt !== null
-                          ? ` · ${((now - startedAt) / 1000).toFixed(1)}s`
-                          : ""}
-                      </span>
-                    </span>
-                    {cell.grade ? <span className="focus__grade">{cell.grade}</span> : null}
-                  </header>
+                    <p className="focus__said">
+                      {block.text}
+                      {working && index === blocks.length - 1 && block.engine === active ? (
+                        <span className="focus__caret" aria-hidden />
+                      ) : null}
+                    </p>
+                  </section>
+                ))}
+                {/* Silence is a fact about the engine, not a gap in the record — say so,
+                    or an engine that never narrates reads as a transcript that got cut. */}
+                {active !== null && !activeSpoke ? (
+                  <p className="focus__silent">
+                    <strong>{activeMeta?.label ?? "This engine"}</strong> ·{" "}
+                    {active === "planner"
+                      ? "composing in a single call — the model returns the finished plan rather than narrating its way there."
+                      : "working without narration; it reports a verdict rather than its reasoning."}
+                  </p>
+                ) : null}
+                {blocks.length === 0 && active === null ? (
+                  <span className="focus__empty">
+                    The agent's thinking will appear here as it works.
+                  </span>
+                ) : null}
+              </div>
+              <div className="focus__calls" aria-label="Capability calls">
+                <span className="panel-eyebrow">
+                  {chips.length > 0 ? `${chips.length} tool calls` : "No tool calls yet"}
+                </span>
+                {chips.slice(-12).map((chip) => (
+                  <span key={chip.id} className={`call call--${chip.state}`} title={chip.summary}>
+                    <span aria-hidden>{chip.state === "done" ? "✓ " : "… "}</span>
+                    {chip.module} · {chip.fn}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </details>
+        </article>
+      ) : null}
 
-                  {cell.note ? <p className="focus__note">{cell.note}</p> : null}
-
-                  {/* The phase frame is NOT paced, so while the card is only borrowed by
-                      the next engine the phase has usually already moved on — showing its
-                      status here would caption a queued engine with the next one's work.
-                      Borrowed card: transcript only, no status. */}
-                  {transcript || !pending ? (
-                    <div className="focus__body" ref={bodyRef} aria-live="polite" aria-label="Reasoning">
-                      {transcript ? (
-                        <>
-                          {transcript}
-                          <span className="focus__caret" aria-hidden />
-                        </>
-                      ) : planning ? (
-                        <span className="focus__waiting">
-                          {PLANNING_MESSAGES[rotation % PLANNING_MESSAGES.length]}
-                        </span>
-                      ) : (
-                        // No transcript from this engine: its own note (rendered above)
-                        // already says what it is doing. A phase-derived line here would
-                        // describe a different engine's work.
-                        <span className="focus__waiting">{cell.note ? "" : "working…"}</span>
-                      )}
-                    </div>
-                  ) : null}
-
-                  {chips.length > 0 ? (
-                    <div className="focus__calls" aria-label="Capability calls">
-                      {chips.slice(-3).map((chip) => (
-                        <span key={chip.id} className={`call call--${chip.state}`} title={chip.summary}>
-                          <span aria-hidden>{chip.state === "done" ? "✓" : "…"}</span>
-                          {chip.module} · {chip.fn}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                </article>
-              </li>
-            );
-          }
-
-          return (
-            <li key={engine.id} className="run-row run-row--ghost">
-              <i className="run-dot run-dot--ghost" aria-hidden />
-              <span className="run-row__name">{engine.label}</span>
-              <span className="run-row__verdict">{cell.status === "active" ? "working…" : "queued"}</span>
-              <span className="run-row__ms" />
-            </li>
-          );
-        })}
-      </ol>
+      <section className="pipe" aria-label="Harness pipeline">
+        <header className="pipe__head">
+          <span className="panel-eyebrow">Pipeline</span>
+          <span className="panel-meta">
+            {cleared} of {ENGINES.length} engines cleared
+            {chips.length > 0 ? ` · ${chips.length} tool calls` : ""}
+          </span>
+        </header>
+        {pipeline}
+      </section>
     </section>
   );
 }

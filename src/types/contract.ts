@@ -127,8 +127,12 @@ export interface UserGoal {
 
 /**
  * constraints.hard is the ONLY block the deterministic Safety filter enforces
- * (allergens, medical, dietary, budget_cap, quiet_hours, …). Free-form by
- * design — the protocol stays domain-agnostic.
+ * (allergens, medical, dietary, budget_cap, quiet_hours, peak_hours,
+ * away_window, …). Free-form by design — the protocol stays domain-agnostic.
+ *
+ * v6: the cloud RESOLVES this per goal from the household constraint store, so
+ * the cap and window keys differ by domain (a vacation goal carries a travel cap
+ * and an away window) while allergens/dietary/medical are always the full set.
  */
 export interface DispatchConstraints {
   hard: Record<string, unknown>;
@@ -386,8 +390,48 @@ export interface UnderstandingPayload {
   domain: string;
   /** Display-ready hard-constraint chips, same shape as PresentPlan payload.knew. */
   knew: PlanKnew;
+  /**
+   * v6, ADDITIVE: the provenance behind the chips — one row per applied
+   * constraint.
+   */
+  constraints?: AppliedConstraint[];
+  /**
+   * v6-M4: household rules the user just STATED, offered for confirmation. The
+   * cloud proposes; only the ids sent back in `accepted_constraint_ids` are ever
+   * written — a model must not author the policy it is then checked against.
+   */
+  proposed_constraints?: ProposedConstraint[];
+  /** v6-M4: this gate is a capture, not a goal — no plan is coming. */
+  capture_only?: boolean;
   thought: string;
   time_window?: TimeWindow;
+}
+
+/** A household rule the cloud heard and is offering to remember (v6-M4). */
+export interface ProposedConstraint {
+  /** Proposal id, valid for this gate only — the stored id is minted on write. */
+  id: string;
+  kind: string;
+  value: unknown;
+  /** "hard" rules block a plan; "soft" ones only bias it. */
+  enforcement: "hard" | "soft";
+  label: string;
+  /** The user's own words, so they can see what was heard. */
+  quote?: string;
+  /** ISO date, when the user time-boxed it ("for two weeks"). */
+  expires_on?: string;
+}
+
+/** Where one applied constraint came from, and why it was picked for this goal. */
+export interface AppliedConstraint {
+  id: string;
+  label: string;
+  /** Already display-formatted by the cloud ("$1500", "21:30–07:00"). */
+  value: string;
+  enforcement: "hard" | "soft";
+  source: "account" | "derived" | "chat";
+  /** "always enforced" | "domain" | "household default" | "relevance" | "tagged" */
+  why: string;
 }
 
 export interface Understanding {
@@ -401,6 +445,11 @@ export interface Understanding {
 
 export interface UnderstandingResponsePayload {
   confirmed: boolean;
+  /**
+   * v6-M4: which proposed rules the user ticked. Absent or empty captures
+   * nothing — confirming the GOAL never silently confirms a rule with it.
+   */
+  accepted_constraint_ids?: string[];
 }
 
 export interface UnderstandingResponse {

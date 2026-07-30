@@ -23,6 +23,8 @@ export interface GoalBarProps {
   cleared: number;
   total: number;
   deviceLabel: string | null;
+  /** v6-M4: a capture is not a plan — the bar must not say PLANNING over it. */
+  eyebrow?: string;
   connection: ConnectionState;
   /** Re-open the device picker. The chip is the affordance — it is the only place
       the pairing is shown, so it has to be the place you can change it. */
@@ -48,6 +50,7 @@ export function GoalBar({
   cleared,
   total,
   deviceLabel,
+  eyebrow,
   connection,
   onChangeDevice,
   theater,
@@ -75,7 +78,7 @@ export function GoalBar({
     <header className="goalbar">
       <div className="goalbar__row">
         <div className="goalbar__lead">
-          <p className="goalbar__eyebrow">PLANNING</p>
+          <p className="goalbar__eyebrow">{eyebrow ?? "PLANNING"}</p>
           <h1 className="goalbar__goal">{goal || fallback}</h1>
         </div>
         <div className="goalbar__aside">
