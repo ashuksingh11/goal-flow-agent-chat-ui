@@ -104,8 +104,17 @@ export function WorkingColumn({
   const blocks = useMemo(() => buildTranscriptBlocks(entries), [entries]);
   // Cheap identity for "has anything been added": the effect below only needs to know
   // that the text grew, not what it says.
-  const transcriptSize = blocks.reduce((n, b) => n + b.text.length, 0);
-  const activeSpoke = active !== null && blocks.some((b) => b.engine === active);
+  const transcriptSize = blocks.reduce((n, b) => n + b.text.length + b.steps.length, 0);
+  // "Spoke" now means steps OR prose. Without the steps half, the planner — which since
+  // v7 reports its work in steps and still never narrates — would keep claiming silence
+  // directly above the three steps it had just reported.
+  const activeSpoke =
+    active !== null && blocks.some((b) => b.engine === active && (b.text !== "" || b.steps.length > 0));
+  /** The newest step from whichever engine is live — the one-line peek when it has no prose. */
+  const lastStep = blocks
+    .filter((b) => active === null || b.engine === active)
+    .flatMap((b) => b.steps)
+    .at(-1);
   const settling = !harness.settled; // beats still draining, or the settle window is open
   // `working` goes false the moment present_plan lands, which is BEFORE the last beats have
   // been read — the settle window keeps the card alive on its own, or Approval (always the
@@ -152,9 +161,13 @@ export function WorkingColumn({
     el.scrollTo({ top: el.scrollHeight, behavior: reduced ? "auto" : "smooth" });
   }, [transcriptSize]);
 
-  const live = planning
-    ? PLANNING_MESSAGES[rotation % PLANNING_MESSAGES.length]
-    : peek(transcript);
+  // A real step beats a rotating placeholder: PLANNING_MESSAGES exists only because the
+  // planner used to have nothing true to say for ~60-90s. It stays as the fallback for
+  // the stretch before the first step lands.
+  const live =
+    peek(transcript) ||
+    (lastStep ? (lastStep.detail ? `${lastStep.step} — ${lastStep.detail}` : lastStep.step) : "") ||
+    (planning ? PLANNING_MESSAGES[rotation % PLANNING_MESSAGES.length] : "");
   // The drawer shows the same words in full — no reason to preview them at the same time.
   const [detailsOpen, setDetailsOpen] = useState(false);
 
@@ -268,12 +281,32 @@ export function WorkingColumn({
                     <span className="panel-eyebrow focus__who">
                       {ENGINES.find((e) => e.id === block.engine)?.label ?? "Agent"}
                     </span>
-                    <p className="focus__said">
-                      {block.text}
-                      {working && index === blocks.length - 1 && block.engine === active ? (
-                        <span className="focus__caret" aria-hidden />
-                      ) : null}
-                    </p>
+                    {/* Steps first: they are what the engine DID, in order, and they are
+                        the same whether or not the model felt like narrating. The prose
+                        below is its voice, and it is often absent. */}
+                    {block.steps.length > 0 ? (
+                      <ol className="focus__steps">
+                        {block.steps.map((s) => (
+                          <li key={s.id} className={`focus__step focus__step--${s.tone}`}>
+                            <span className="focus__step-mark" aria-hidden>
+                              {s.tone === "notice" ? "!" : "✓"}
+                            </span>
+                            <span className="focus__step-body">
+                              <strong className="focus__step-label">{s.step}</strong>
+                              {s.detail ? <span className="focus__step-detail">{s.detail}</span> : null}
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : null}
+                    {block.text ? (
+                      <p className="focus__said">
+                        {block.text}
+                        {working && index === blocks.length - 1 && block.engine === active ? (
+                          <span className="focus__caret" aria-hidden />
+                        ) : null}
+                      </p>
+                    ) : null}
                   </section>
                 ))}
                 {/* Silence is a fact about the engine, not a gap in the record — say so,

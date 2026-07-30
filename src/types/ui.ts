@@ -375,6 +375,27 @@ export type AgentStreamEntry =
       engine?: HarnessModule | null;
     }
   | {
+      /**
+       * v7: ONE labelled step of the work, whole on arrival.
+       *
+       * Separate from "thinking" rather than a flag on it, because the two behave
+       * differently at their core: narration is a stream of fragments that must be
+       * accumulated and cleaned before it means anything, and a step is a finished
+       * statement that must NOT be. Merging them would put a step at the mercy of the
+       * blob-stripping heuristics that exist only because prose and JSON share one
+       * untyped channel.
+       */
+      kind: "step";
+      id: number;
+      /** The headline, e.g. "Composing the plan". */
+      step: string;
+      /** The sub-line under it, e.g. "7 tasks · 20 tools · 3 household rules to hold". */
+      detail?: string;
+      /** "notice" = a retry, a fallback, a safety block — the run talking about itself. */
+      tone: "step" | "notice";
+      engine?: HarnessModule | null;
+    }
+  | {
       kind: "chip";
       id: number;
       module: string;

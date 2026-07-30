@@ -260,6 +260,31 @@ function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
       // its own engine said. `activeModule` is the PAINTED engine and lags by the render
       // floor, which would file grounding's narration under whichever card is on screen.
       const engine = next.harness.wireActive;
+
+      // v7 — A STEP IS NOT A FRAGMENT. It arrives whole, so it is never merged with what
+      // came before and never touched by the blob-stripping below; those heuristics exist
+      // only because prose and JSON share one untyped channel, and a step does not.
+      const thinkingKind = event.payload.kind;
+      if (thinkingKind === "step" || thinkingKind === "notice") {
+        const step = event.payload.step ?? event.payload.text;
+        if (!step.trim()) return next;
+        return {
+          ...next,
+          nextId: next.nextId + 1,
+          agentEntries: [
+            ...next.agentEntries,
+            {
+              kind: "step",
+              id: next.nextId,
+              step,
+              detail: event.payload.detail,
+              tone: thinkingKind === "notice" ? "notice" : "step",
+              engine,
+            },
+          ],
+        };
+      }
+
       const last = next.agentEntries[next.agentEntries.length - 1];
       const sameEngine = last?.kind === "thinking" && (last.engine ?? null) === engine;
       const merged = sameEngine && last?.kind === "thinking" ? last.text + event.payload.text : event.payload.text;

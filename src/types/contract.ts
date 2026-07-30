@@ -195,7 +195,20 @@ export interface AgentPhaseEvent extends AgentEventBase {
 /** A fragment of the model's reasoning → append to the live thinking stream. */
 export interface AgentThinkingEvent extends AgentEventBase {
   event: "thinking";
-  payload: { text: string };
+  payload: {
+    /** Always present. For a step this is "step — detail", so it reads as a sentence. */
+    text: string;
+    /**
+     * v7. Absent means "narration", which is every thinking event emitted before v7.
+     * A "step" is WHOLE on arrival — render it immediately rather than accumulating
+     * chunks and guessing where one thought ends.
+     */
+    kind?: "narration" | "step" | "notice";
+    /** v7, kind="step": the headline. */
+    step?: string;
+    /** v7, kind="step": the sub-line under it. */
+    detail?: string;
+  };
 }
 
 /** The LLM is calling a capability function → pop in a running tool chip. */
@@ -350,6 +363,20 @@ export interface PlanPayload {
   impact: ImpactBadge[];
   demo_events?: DemoEvent[];
   explanation: string;
+  /** v7: how many options the planner weighed before choosing. Absent is normal. */
+  considered?: number;
+  /**
+   * v7: what it weighed and did NOT take. Model-authored and display-only —
+   * nothing reads it, and a wrong reason costs a wrong sentence. A lookup table
+   * cannot reject, which is why this is the clearest evidence of reasoning here.
+   */
+  rejected?: RejectedOption[];
+}
+
+/** One option the planner considered and did not take, and why (v7). */
+export interface RejectedOption {
+  option: string;
+  reason: string;
 }
 
 /** Device → cloud. The UI sees its relayed twin, PresentPlan. */
