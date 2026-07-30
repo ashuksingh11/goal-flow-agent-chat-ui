@@ -315,6 +315,15 @@ export interface PlanItem {
   why: string[];
   /** Free-form badges ("waste-win", "veg", "prep"). */
   tags: string[];
+  /**
+   * v7. Absent or "planned" is a normal row; "skipped" is a day deliberately left
+   * empty — still rendered, styled down, carrying its reason. Deleting the row was
+   * the alternative and it is worse: a shorter plan says nothing about WHY it got
+   * shorter, and reads as data loss rather than a decision.
+   */
+  status?: "planned" | "skipped";
+  /** Why it is skipped, in the user's terms — "you're away · from Get my home ready". */
+  status_reason?: string;
 }
 
 /**
@@ -622,14 +631,17 @@ export interface Status {
 // ---------------------------------------------------------------------------
 
 /**
- * A terminal, non-plan message. Sent when the graph ends before any device
- * dispatch — today, when the interpreter declines an out-of-scope goal
- * (GoalFlow only acts on meal plans + guest dinners).
+ * A non-plan message about a goal.
+ *
+ * Terminal for "out_of_scope" and "declined" — the graph ended before any device
+ * dispatch. NOT terminal for v7's "updating_goals", which arrives mid-save to caption
+ * the saving screen while the cloud updates the user's OTHER goals; a consumer that
+ * clears its stage on every notice would tear down the screen this one describes.
  */
 export interface Notice {
   type: "notice";
   goal_id: string;
-  kind: "out_of_scope" | "declined";
+  kind: "out_of_scope" | "declined" | "updating_goals";
   message: string;
 }
 

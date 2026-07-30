@@ -134,12 +134,16 @@ export function PlanCard({
           const morph = morphs[item.id];
           const open = openId === item.id;
           const when = formatWhen(item.when) ?? `${String(index + 1).padStart(2, "0")}`;
+          // v7: a day deliberately left empty. STILL RENDERED — deleting the row was the
+          // alternative and it is worse: a shorter plan says nothing about why it got
+          // shorter, and reads as data loss rather than as a decision someone made.
+          const skipped = item.status === "skipped";
 
           return (
             <li
               key={`${item.id}:${isChanged ? morphSeq : 0}`}
               ref={firstChangedId === item.id ? changedRowRef : undefined}
-              className={`day${open ? " day--open" : ""}${isChanged ? " day--morph" : ""}`}
+              className={`day${open ? " day--open" : ""}${isChanged ? " day--morph" : ""}${skipped ? " day--skipped" : ""}`}
             >
               <button
                 type="button"
@@ -165,7 +169,12 @@ export function PlanCard({
                   {/* v7: ALWAYS VISIBLE. `why` has ridden the wire since v2 and lived
                       inside a collapsed row nobody opens — which is where the one piece
                       of evidence that something reasoned about this day was kept. */}
-                  {item.why.length > 0 ? (
+                  {skipped && item.status_reason ? (
+                    <span className="day__why">
+                      <span aria-hidden>✈ </span>
+                      {item.status_reason}
+                    </span>
+                  ) : item.why.length > 0 ? (
                     <span className="day__why">
                       <span aria-hidden>↳ </span>
                       {item.why[0]}

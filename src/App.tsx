@@ -149,6 +149,19 @@ interface UiState {
   firingEventId: string | null;
   /** Unlocks the world-event strip after the user approves the initial plan. */
   approved: boolean;
+  /**
+   * v7: the moment between "Approve & Save" and the webview closing.
+   *
+   * It existed before and was invisible. The cloud's chat_ui_close arrives within a
+   * round-trip of the approval, so the UI reset before the user could read anything —
+   * which meant the execution status frames (what actually ran, what was deferred,
+   * what was blocked) landed on a surface that had already gone. Now the surface holds
+   * for a minimum dwell, and for Act 3 it holds for as long as the cross-goal update
+   * genuinely takes, because the cloud does that work BEFORE it sends the close.
+   */
+  saving: { startedAt: number; detail: string | null } | null;
+  /** A close that arrived before the saving dwell was up; applied when it expires. */
+  pendingClose: string | null;
   /** Sustain ticks for StatusTimeline (capped). */
   ticks: Status[];
   demoClock: DemoClock;
@@ -197,6 +210,8 @@ const INITIAL_STATE: UiState = {
   firedEventIds: [],
   firingEventId: null,
   approved: false,
+  saving: null,
+  pendingClose: null,
   ticks: [],
   demoClock: INITIAL_DEMO_CLOCK,
   transcript: [],
@@ -224,7 +239,18 @@ type UiAction =
   | { type: "decisions_sent"; decisions: ApprovalDecision[] }
   | { type: "event_fired"; eventId: string }
   | { type: "event_timeout"; eventId: string }
+  | { type: "close_now" }
   | { type: "demo_reset" };
+
+/**
+ * How long "Saving…" stays up at minimum (v7).
+ *
+ * Not a delay for its own sake: the cloud does the cross-goal work BEFORE it closes the
+ * webview, so in Act 3 this screen is up for exactly as long as that takes and the floor
+ * never binds. It binds in Act 1, where saving really is instant and a flash of a screen
+ * nobody can read is worse than no screen at all.
+ */
+const MIN_SAVING_MS = 1400;
 
 const MAX_FRAMES = 120;
 const MAX_TICKS = 40;
@@ -441,6 +467,46 @@ function boundDeviceOnline(boundId: string | null, choices: DeviceInfo[] | null)
   return choices.some((device) => device.device_id === boundId);
 }
 
+/**
+ * The create phase for the active goal terminated (approval / declined gate / terminal
+ * error) → back to the idle waiting state. The board owns the goal now.
+ *
+ * Extracted in v7 because two paths reach it: the cloud's `chat_ui_close`, and the timer
+ * that applies a close which arrived while the saving screen was still up.
+ */
+function closeCreatePhase(state: UiState): UiState {
+  return {
+    ...state,
+        activeGoalId: null,
+        understanding: null,
+        goalText: "",
+        phase: null,
+        working: false,
+        agentEntries: [],
+        harness: INITIAL_HARNESS,
+        draftItems: [],
+        draftQueue: [],
+        draftHoldUntil: 0,
+        draftTotal: null,
+        plan: null,
+        pristinePlan: null,
+        changedPlanIds: [],
+        planMorphs: {},
+        morphSeq: 0,
+        changedImpactLabels: [],
+        proposalStatuses: {},
+        adaptations: [],
+        eventChips: [],
+        firedEventIds: [],
+        firingEventId: null,
+        approved: false,
+        ticks: [],
+        lastSeq: 0,
+    saving: null,
+    pendingClose: null,
+  };
+}
+
 /** The single inbound-frame → UI-state mapping (see ARCHITECTURE.md table). */
 function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
   if ("goal_id" in message && message.goal_id === state.declinedGoalId) {
@@ -506,6 +572,15 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
       };
 
     case "notice":
+      // v7: NOT every notice is terminal. "updating_goals" arrives mid-save, while the
+      // saving screen is deliberately still up, and says what the cloud is doing to the
+      // user's OTHER goals. Clearing the stage on it would tear down the very screen it
+      // is captioning.
+      if (message.kind === "updating_goals") {
+        return withGoal.saving
+          ? { ...withGoal, saving: { ...withGoal.saving, detail: message.message } }
+          : withGoal;
+      }
       // Terminal, non-plan message (e.g. an out-of-scope decline). The goal
       // never reached the device — clear the stage and surface the redirect as a
       // prominent transcript note (activeGoalId=null lets the note render).
@@ -587,38 +662,14 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
     }
 
     case "chat_ui_close":
-      // The create phase for the active goal terminated (approval / declined gate /
-      // terminal error) → return to the idle waiting state. The board owns the goal
-      // now. (The strict filter above already dropped a close for any other goal;
-      // the post-approval handoff banner was the pre-close beat.)
-      return {
-        ...withGoal,
-        activeGoalId: null,
-        understanding: null,
-        goalText: "",
-        phase: null,
-        working: false,
-        agentEntries: [],
-        harness: INITIAL_HARNESS,
-        draftItems: [],
-        draftQueue: [],
-        draftHoldUntil: 0,
-        draftTotal: null,
-        plan: null,
-        pristinePlan: null,
-        changedPlanIds: [],
-        planMorphs: {},
-        morphSeq: 0,
-        changedImpactLabels: [],
-        proposalStatuses: {},
-        adaptations: [],
-        eventChips: [],
-        firedEventIds: [],
-        firingEventId: null,
-        approved: false,
-        ticks: [],
-        lastSeq: 0,
-      };
+      // v7: HOLD IT while the saving screen is up. The cloud closes within a round-trip
+      // of the approval, which used to wipe the surface before anyone could read it —
+      // and took the execution status frames with it. The close is remembered and
+      // applied when the dwell expires (see the effect that dispatches close_now).
+      if (withGoal.saving && Date.now() - withGoal.saving.startedAt < MIN_SAVING_MS) {
+        return { ...withGoal, pendingClose: message.goal_id };
+      }
+      return closeCreatePhase(withGoal);
 
     case "present_plan":
       return {
@@ -852,6 +903,9 @@ function reducer(state: UiState, action: UiAction): UiState {
         lastSeq: 0,
       };
 
+    case "close_now":
+      return closeCreatePhase(state);
+
     case "decisions_sent": {
       const proposalStatuses = { ...state.proposalStatuses };
       for (const decision of action.decisions) {
@@ -865,7 +919,15 @@ function reducer(state: UiState, action: UiAction): UiState {
       // The event strip unlocks once the user has approved every approval-required
       // proposal on the initial plan. Pending approvals count because the user
       // has acted on the plan CTA; later status frames only confirm execution.
-      return { ...state, proposalStatuses, approved: isPlanApproved(state.plan, proposalStatuses) };
+      const approved = isPlanApproved(state.plan, proposalStatuses);
+      return {
+        ...state,
+        proposalStatuses,
+        approved,
+        // v7: hold the surface. Everything the device reports about what actually ran
+        // arrives AFTER this tap, and used to land on a UI the close had already wiped.
+        saving: approved ? { startedAt: Date.now(), detail: null } : state.saving,
+      };
     }
 
     case "event_fired":
@@ -925,6 +987,24 @@ export default function App() {
   const socketRef = useRef<GoalFlowSocket | null>(null);
   const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
   const [connection, setConnection] = useState<ConnectionState>("connecting");
+  /**
+   * Apply a close that arrived while "Saving…" was still up (v7).
+   *
+   * The cloud closes the webview within a round-trip of the approval, so without this
+   * the screen that reports what was saved is destroyed before it can be read — and the
+   * execution status frames land on a surface that is already gone.
+   */
+  useEffect(() => {
+    if (!state.pendingClose || !state.saving) return;
+    const remaining = MIN_SAVING_MS - (Date.now() - state.saving.startedAt);
+    if (remaining <= 0) {
+      dispatch({ type: "close_now" });
+      return;
+    }
+    const id = window.setTimeout(() => dispatch({ type: "close_now" }), remaining);
+    return () => window.clearTimeout(id);
+  }, [state.pendingClose, state.saving]);
+
   const [presenterMode, setPresenterMode] = useState(false);
   // v5: full-screen "harness theater" for projecting the pipeline on stage.
   const [theaterMode, setTheaterMode] = useState(false);
@@ -1275,7 +1355,25 @@ export default function App() {
         </main>
       )}
 
-      {state.approved ? (
+      {/* v7 — THE SAVING SCREEN. Replaces the hand-off banner while the save is in
+          flight: the banner said what WOULD happen next, and this says what is
+          happening now. In Act 1 it is up for the dwell floor; in Act 3 it is up for as
+          long as the cross-goal update takes, because the cloud does that work before
+          it closes the webview. */}
+      {state.saving ? (
+        <div className="saving" role="status" aria-live="polite">
+          <span className="saving__spinner" aria-hidden="true" />
+          <div className="saving__body">
+            <strong className="saving__title">
+              {state.saving.detail ? "Saving, and updating your other goals…" : "Saving your plan…"}
+            </strong>
+            <span className="saving__detail">
+              {state.saving.detail ??
+                "Writing it to your device AI board. Your Family Hub takes it from here."}
+            </span>
+          </div>
+        </div>
+      ) : state.approved ? (
         <div className="handoff" role="status">
           <span className="handoff__mark" aria-hidden="true">✓</span>
           <div className="handoff__body">
