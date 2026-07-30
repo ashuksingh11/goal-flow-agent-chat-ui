@@ -391,10 +391,17 @@ export interface UnderstandingPayload {
   /** Display-ready hard-constraint chips, same shape as PresentPlan payload.knew. */
   knew: PlanKnew;
   /**
-   * v6, ADDITIVE: the provenance behind the chips — one row per applied
-   * constraint.
+   * v6, ADDITIVE: the provenance behind the chips — one row per applied HARD
+   * constraint, and (v7) only the ones this domain displays, so these line up
+   * one-for-one with `knew`.
    */
   constraints?: AppliedConstraint[];
+  /**
+   * v7, ADDITIVE: the SOFT half — one row per preference entry, rendered as its
+   * own lighter section. A preference shapes the plan and can never block it, so
+   * it must not look like a constraint chip. Empty is normal.
+   */
+  preferences?: AppliedPreference[];
   /**
    * v6-M4: household rules the user just STATED, offered for confirmation. The
    * cloud proposes; only the ids sent back in `accepted_constraint_ids` are ever
@@ -425,12 +432,29 @@ export interface ProposedConstraint {
 /** Where one applied constraint came from, and why it was picked for this goal. */
 export interface AppliedConstraint {
   id: string;
+  /** v7: the store kind ("allergens", "away_window") — used to pair a row with its chip. */
+  kind?: string;
   label: string;
   /** Already display-formatted by the cloud ("$1500", "21:30–07:00"). */
   value: string;
   enforcement: "hard" | "soft";
   source: "account" | "derived" | "chat";
   /** "always enforced" | "domain" | "household default" | "relevance" | "tagged" */
+  why: string;
+}
+
+/**
+ * One preference the plan is biased toward (v7). Deliberately NOT an
+ * AppliedConstraint: there is no `enforcement` field because there is nothing to
+ * enforce, and a shared type would invite a renderer to treat the two alike.
+ */
+export interface AppliedPreference {
+  id: string;
+  label: string;
+  /** Already display-formatted by the cloud ("prefer white meat, chicken turkey fish over red meat"). */
+  value: string;
+  source: "account" | "derived" | "chat";
+  /** "relevance" | "tagged" — how this preference was picked for this goal. */
   why: string;
 }
 
