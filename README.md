@@ -30,7 +30,8 @@ as discriminated unions in [`src/types/contract.ts`](src/types/contract.ts).
 - **The working column** — one column for the passage of work: engines that finished collapse into
   receipts carrying their verdict and measured duration (`Grounding · grounded · 59.3s`), the one
   running holds a focus card with the live reasoning transcript and its tool-call chips inside it,
-  and the rest wait below as ghosts. The page never scrolls.
+  and the rest wait below as ghosts. Each card sizes to its own content; the goal bar stays
+  pinned and only the content area scrolls (v5.2).
 - **The plan, landing** — `plan_progress` rows arrive into slots reserved before the content does,
   paced so the whole plan does not appear in a single frame, then the hero (`PlanCard`) takes over:
   the "Knew" chips, the safety chip ("LLM plans, code checks"), generic plan items

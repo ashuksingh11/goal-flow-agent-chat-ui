@@ -204,10 +204,14 @@ transcript and its tool chips inside it), the rest are ghosts. Between beats no 
 the card is **borrowed** by the next one up (`pending`) rather than vanishing — losing the only
 stretchy element for a second would make everything below it jump.
 
-**Boxes fit their content; caps stop the page scrolling.** The first cut conserved total height by
-letting the focus card absorb every spare pixel, which put a one-line note in a box half the
-screen tall. Now the card grows with what it holds (transcript scrolls at `max-height: 34vh`), the
-run column caps at 62%, and the outcome region takes the rest.
+**Cards size to their content; the column scrolls (v5.2).** v5.1 conserved total height by letting
+the focus card absorb every spare pixel — which put a one-line note in a box half the screen tall.
+Fitting the content fixed that but kept the never-scroll promise, and the plan card cannot make it:
+seven steps plus approvals exceed any viewport, and a clipped "Approve" beats no scrollbar. So
+`.column` scrolls its content while the goal bar stays put, and `.column__main > * { flex: 0 0
+auto; }` is load-bearing — flex items shrink by default, and a squeezed box whose content kept
+painting drew the cleared pipeline through the plan card. The transcript caps at
+`max-height: 220px`.
 
 Durations are stamped in `enqueueHarness` at ARRIVAL, never at paint: paint is paced by
 `HARNESS_ACTIVE_FLOOR_MS`, so measuring at drain time would just report the floor back. Under
