@@ -74,6 +74,8 @@
   flex-direction: column;
   gap: 1rem;
   overflow: hidden;
+  /* The containing block for the saving screen's full-surface takeover (v7). */
+  position: relative;
 }
 
 .column { display: flex; gap: 1rem; flex: 1; min-height: 0; }
@@ -768,25 +770,37 @@ summary:focus-visible {
 }
 
 /* --- hand-off banner (v3.1-M2): after approval, the goal lives on the board --- */
-/* v7 — the saving screen. Same footprint as the hand-off banner it replaces, in the
-   accent rather than the success colour: nothing has succeeded yet, it is in flight. */
+/* v7 — THE SAVING SCREEN, and it is a screen rather than a banner on purpose.
+   The tap that reaches it is the last one in the create phase: the goal is leaving this
+   surface for the board, and the webview is about to disappear. A footer note under a
+   plan the user has finished with would be read as one more thing to read; a takeover
+   says "this conversation is over, the work has moved" — which is exactly what happened.
+   It also has to carry a wait that is sometimes a second (Act 1) and sometimes a minute
+   (Act 3, while another goal re-plans), so it must be able to hold the eye. */
 .saving {
-  margin: 0.75rem 1.25rem calc(1rem + env(safe-area-inset-bottom));
+  position: absolute;
+  inset: 0;
+  z-index: 30;
   display: flex;
-  align-items: flex-start;
-  gap: 0.7rem;
-  padding: 0.9rem 1rem;
-  background: var(--accent-soft);
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-m);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 2rem 1.75rem;
+  text-align: center;
+  background: var(--bg);
+  animation: saving-in 220ms ease-out both;
+}
+@keyframes saving-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .saving { animation: none; }
 }
 .saving__spinner {
   flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  margin-top: 1px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
-  border: 2.5px solid var(--accent);
+  border: 3px solid var(--accent);
   border-top-color: transparent;
   animation: saving-spin 900ms linear infinite;
 }
@@ -795,9 +809,9 @@ summary:focus-visible {
   .saving__spinner { animation: none; border-top-color: var(--accent-soft); }
 }
 @keyframes saving-spin { to { transform: rotate(360deg); } }
-.saving__body { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
-.saving__title { font-size: 0.95rem; font-weight: 700; color: var(--ink); }
-.saving__detail { font-size: 0.85rem; line-height: 1.45; color: var(--ink-dim); }
+.saving__body { display: flex; flex-direction: column; gap: 0.4rem; max-width: 30rem; }
+.saving__title { font-size: 1.15rem; font-weight: 700; color: var(--ink); }
+.saving__detail { font-size: 0.95rem; line-height: 1.55; color: var(--ink-dim); }
 
 .handoff {
   margin: 0.75rem 1.25rem calc(1rem + env(safe-area-inset-bottom));

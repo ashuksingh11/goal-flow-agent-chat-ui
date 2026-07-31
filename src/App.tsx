@@ -1394,11 +1394,13 @@ export default function App() {
           <span className="saving__spinner" aria-hidden="true" />
           <div className="saving__body">
             <strong className="saving__title">
-              {state.saving.detail ? "Saving, and updating your other goals…" : "Saving your plan…"}
+              {state.saving.detail
+                ? "Saving this goal, and updating your other goals…"
+                : "Saving your plan to the device AI board"}
             </strong>
             <span className="saving__detail">
               {state.saving.detail ??
-                "Writing it to your device AI board. Your Family Hub takes it from here."}
+                "Your Family Hub takes it from here — it tracks progress, watches the world, and asks you on the board if anything needs to change."}
             </span>
           </div>
         </div>
