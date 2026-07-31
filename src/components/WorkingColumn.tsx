@@ -359,18 +359,23 @@ export function WorkingColumn({
         </article>
       ) : null}
 
-      <section className="pipe" aria-label="Harness pipeline">
-        <header className="pipe__head">
-          <span className="panel-eyebrow">Pipeline</span>
-          <span className="panel-meta">
-            {interpreting
-              ? `${ENGINES.length} engines ready`
-              : `${cleared} of ${ENGINES.length} engines cleared`}
-            {chips.length > 0 ? ` · ${chips.length} tool calls` : ""}
-          </span>
-        </header>
-        {pipeline}
-      </section>
+      {/* The pipeline is the DEVICE's run, so it appears when the device has one.
+          During interpretation it is seven grey rows all saying "queued" under a
+          heading that counts nothing — a full screen of furniture below a card that
+          is the only thing with news. Worse, it invites the reading that seven things
+          are stuck, when the truth is that none of them has been asked to start. */}
+      {interpreting ? null : (
+        <section className="pipe" aria-label="Harness pipeline">
+          <header className="pipe__head">
+            <span className="panel-eyebrow">Pipeline</span>
+            <span className="panel-meta">
+              {cleared} of {ENGINES.length} engines cleared
+              {chips.length > 0 ? ` · ${chips.length} tool calls` : ""}
+            </span>
+          </header>
+          {pipeline}
+        </section>
+      )}
     </section>
   );
 }

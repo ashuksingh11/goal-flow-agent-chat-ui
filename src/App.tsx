@@ -1414,6 +1414,20 @@ export default function App() {
               {state.saving.detail ??
                 "Your Family Hub takes it from here — it tracks progress, watches the world, and asks you on the board if anything needs to change."}
             </span>
+            {/* INDETERMINATE, and it has to be: the cloud holds this screen until the
+                OTHER goal has actually re-planned, and nobody — not the chat, not the
+                cloud — knows how long that will take. A bar that filled to a percentage
+                would be inventing one. This says "in flight", for as long as it is,
+                which over the 20-30s of Act 3 is what a lone spinner was failing to
+                carry. */}
+            <div
+              className="saving__track"
+              role="progressbar"
+              aria-label="Saving"
+              aria-busy="true"
+            >
+              <span className="saving__bar" />
+            </div>
           </div>
         </div>
       ) : state.approved ? (

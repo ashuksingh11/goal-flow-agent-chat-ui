@@ -813,6 +813,35 @@ summary:focus-visible {
 .saving__title { font-size: 1.15rem; font-weight: 700; color: var(--ink); }
 .saving__detail { font-size: 0.95rem; line-height: 1.55; color: var(--ink-dim); }
 
+/* The indeterminate bar. It travels rather than fills, because there is no percentage
+   to be honest about — the wait is however long the other goal's re-plan takes. */
+.saving__track {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 4px;
+  margin-top: 0.9rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+}
+.saving__bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 38%;
+  border-radius: inherit;
+  background: var(--accent);
+  animation: saving-sweep 1400ms cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+@keyframes saving-sweep {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(363%); }  /* 100/38 + 100 — clears its own width */
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Motion off, meaning kept: a full-width wash still reads as "busy", where a stopped
+     bar frozen at 38% would read as "stuck at a third". */
+  .saving__bar { animation: none; width: 100%; opacity: 0.55; }
+}
+
 .handoff {
   margin: 0.75rem 1.25rem calc(1rem + env(safe-area-inset-bottom));
   display: flex;
