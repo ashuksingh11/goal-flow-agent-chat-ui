@@ -33,6 +33,23 @@ export const PLANNING_MESSAGES = [
   "Finalizing…",
 ];
 
+/**
+ * The INTERPRETATION window (v7.4) — from "the goal arrived" to "here is what I heard".
+ *
+ * The cloud spends 10-60s on one LLM call here, and it is the least explicable wait in
+ * the product: the user has just spoken, and nothing on the device has started yet, so
+ * there are no engines to light up and no tool calls to show. Until v7.4 the webview was
+ * not even open for it. These lines describe what is genuinely happening — reading the
+ * goal, checking it against what this home can do — and none of them claims a step that
+ * has not begun.
+ */
+export const INTERPRETING_MESSAGES = [
+  "Reading your goal…",
+  "Working out what you're asking for…",
+  "Checking it against what this home can do…",
+  "Almost there…",
+];
+
 export const PLANNING_ROTATE_MS = 3000;
 
 export function statusForPhase(phase: RailPhase | null, active: boolean): string {

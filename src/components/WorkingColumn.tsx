@@ -36,6 +36,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { HARNESS_PIPELINE, formatEngineMs } from "../types/ui";
 import type { AgentStreamEntry, HarnessState } from "../types/ui";
 import {
+  INTERPRETING_MESSAGES,
   PLANNING_MESSAGES,
   PLANNING_ROTATE_MS,
   buildTranscript,
@@ -121,17 +122,30 @@ export function WorkingColumn({
   // last engine) is torn down within a frame of resolving.
   const showFocus = !compact && (working || active !== null || settling);
 
-  // Planning is one silent ~60-90s call — rotate a line so the card isn't frozen.
+  /**
+   * INTERPRETING (v7.4): the goal has arrived and the CLOUD is reading it, which happens
+   * before the device is involved at all — so there is no active engine, no beat, no
+   * transcript and nothing cleared. Every one of those is also true of a run that has
+   * died, which is why this state has to name itself: for 10-60s the card otherwise sat
+   * on "Composing your plan…" over an empty progress bar, describing a step that had not
+   * started, and looking exactly like a hang.
+   */
+  const interpreting =
+    working && active === null && cleared === 0 && entries.length === 0 && !settling;
+
+  // Planning is one silent ~60-90s call, and interpretation is a silent 10-60s one —
+  // rotate a line through both so the card is never frozen.
   const planning = active === "planner" && working;
+  const rotating = planning || interpreting;
   const [rotation, setRotation] = useState(0);
   useEffect(() => {
-    if (!planning) {
+    if (!rotating) {
       setRotation(0);
       return;
     }
     const id = window.setInterval(() => setRotation((r) => r + 1), PLANNING_ROTATE_MS);
     return () => window.clearInterval(id);
-  }, [planning]);
+  }, [rotating]);
 
   /**
    * Run elapsed, off the earliest beat ARRIVAL (types/ui.ts stamps it on the wire, not at
@@ -167,7 +181,8 @@ export function WorkingColumn({
   const live =
     peek(transcript) ||
     (lastStep ? (lastStep.detail ? `${lastStep.step} — ${lastStep.detail}` : lastStep.step) : "") ||
-    (planning ? PLANNING_MESSAGES[rotation % PLANNING_MESSAGES.length] : "");
+    (planning ? PLANNING_MESSAGES[rotation % PLANNING_MESSAGES.length] : "") ||
+    (interpreting ? INTERPRETING_MESSAGES[rotation % INTERPRETING_MESSAGES.length] : "");
   // The drawer shows the same words in full — no reason to preview them at the same time.
   const [detailsOpen, setDetailsOpen] = useState(false);
 
@@ -235,7 +250,7 @@ export function WorkingColumn({
           <header className="focus__head">
             <i className="focus__spinner" aria-hidden />
             <h2 className="focus__title">
-              {working ? "Composing your plan…" : "Wrapping up…"}
+              {interpreting ? "Reading your goal…" : working ? "Composing your plan…" : "Wrapping up…"}
             </h2>
             {runStartedAt !== null ? (
               <span className="focus__elapsed">{Math.round((now - runStartedAt) / 1000)}s</span>
@@ -348,7 +363,9 @@ export function WorkingColumn({
         <header className="pipe__head">
           <span className="panel-eyebrow">Pipeline</span>
           <span className="panel-meta">
-            {cleared} of {ENGINES.length} engines cleared
+            {interpreting
+              ? `${ENGINES.length} engines ready`
+              : `${cleared} of ${ENGINES.length} engines cleared`}
             {chips.length > 0 ? ` · ${chips.length} tool calls` : ""}
           </span>
         </header>

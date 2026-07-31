@@ -648,7 +648,10 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         declinedGoalId: null,
         declined: null,
         understanding: null,
-        goalText: "",
+        // v7.4: the open now carries what the user SAID, and it arrives ~10-60s before
+        // the understanding does. Without it the bar reads "Waiting for a goal…" for the
+        // whole interpretation — while the goal it is waiting for is the one being read.
+        goalText: message.goal_text ?? "",
         phase: "interpreting",
         working: true,
         agentEntries: [],
@@ -1279,7 +1282,16 @@ export default function App() {
     <div className="app">
       <GoalBar
         goal={goalText}
-        eyebrow={state.understanding?.payload.capture_only ? "REMEMBERING" : undefined}
+        eyebrow={
+          state.understanding?.payload.capture_only
+            ? "REMEMBERING"
+            : // v7.4: the bracket now opens BEFORE interpretation, so for the first
+              // 10-60s the default "PLANNING" would be describing a phase that has not
+              // begun — the cloud is still working out what was asked.
+              state.phase === "interpreting" && !state.understanding && !state.plan
+              ? "READING"
+              : undefined
+        }
         fallback={state.plan ? "Your plan" : "Waiting for a goal…"}
         startedAt={runStartedAt}
         endedAt={runEndedAt}
