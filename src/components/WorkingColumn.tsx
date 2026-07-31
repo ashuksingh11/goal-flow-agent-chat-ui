@@ -281,9 +281,20 @@ export function WorkingColumn({
                     <span className="panel-eyebrow focus__who">
                       {ENGINES.find((e) => e.id === block.engine)?.label ?? "Agent"}
                     </span>
-                    {/* Steps first: they are what the engine DID, in order, and they are
-                        the same whether or not the model felt like narrating. The prose
-                        below is its voice, and it is often absent. */}
+                    {/* PROSE FIRST, steps under it. The narration is the engine SAYING
+                        what it is about to do ("broke the goal into 8 steps: …") and the
+                        steps are the receipt for it — printing the receipt above the
+                        sentence that announces it reads backwards, and worse, it put the
+                        steps of one engine directly under the previous engine's prose.
+                        The caret still trails the prose, because that is what streams. */}
+                    {block.text ? (
+                      <p className="focus__said">
+                        {block.text}
+                        {working && index === blocks.length - 1 && block.engine === active ? (
+                          <span className="focus__caret" aria-hidden />
+                        ) : null}
+                      </p>
+                    ) : null}
                     {block.steps.length > 0 ? (
                       <ol className="focus__steps">
                         {block.steps.map((s) => (
@@ -298,14 +309,6 @@ export function WorkingColumn({
                           </li>
                         ))}
                       </ol>
-                    ) : null}
-                    {block.text ? (
-                      <p className="focus__said">
-                        {block.text}
-                        {working && index === blocks.length - 1 && block.engine === active ? (
-                          <span className="focus__caret" aria-hidden />
-                        ) : null}
-                      </p>
                     ) : null}
                   </section>
                 ))}

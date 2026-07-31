@@ -407,12 +407,13 @@
    lines that push later blocks out of the scroller. */
 .focus__said { margin: 0; white-space: pre-wrap; }
 
-/* v7 steps — what the engine DID, above whatever it said about it. Deliberately more
-   legible than the prose below: the prose is the model's voice and may not arrive at
-   all, and these are the record that does. */
+/* v7 steps — what the engine DID, under whatever it said it was doing. Deliberately
+   more legible than the prose above: the prose is the model's voice and may not arrive
+   at all, and these are the record that does. The gap is now on TOP (they follow the
+   sentence they are the receipt for) — see WorkingColumn's transcript block. */
 .focus__steps {
   list-style: none;
-  margin: 0 0 0.5rem;
+  margin: 0.5rem 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
