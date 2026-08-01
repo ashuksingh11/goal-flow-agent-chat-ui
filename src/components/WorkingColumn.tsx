@@ -99,9 +99,12 @@ export function WorkingColumn({
   // Per-engine for the LIVE line, so the card never captions one engine with another's
   // words — but the whole run for "Show details", which is the record of the thinking and
   // must not reset every time the spotlight moves to the next engine.
-  const transcript = buildTranscript(entries, active ?? undefined);
-  // Memoized because the run clock re-renders this card ~10×/s and the cleaning pass
-  // walks the whole transcript character by character.
+  // Memoized for the same reason `blocks` is: this walks the whole transcript and
+  // `stripJsonBlobs` scans it character by character, and the card re-renders on the run
+  // clock. It was the one of the pair that never got the memo.
+  const transcript = useMemo(() => buildTranscript(entries, active ?? undefined), [entries, active]);
+  // Same reason. (The clock used to re-render this card ~10×/s; since v7.8 it only does so
+  // when the displayed SECOND changes, but streaming chunks still rebuild both of these.)
   const blocks = useMemo(() => buildTranscriptBlocks(entries), [entries]);
   // Cheap identity for "has anything been added": the effect below only needs to know
   // that the text grew, not what it says.
@@ -158,22 +161,58 @@ export function WorkingColumn({
     );
     return stamps.length > 0 ? Math.min(...stamps) : null;
   }, [harness.engines]);
-  const [now, setNow] = useState(() => Date.now());
+  /**
+   * ELAPSED SECONDS, and it only re-renders when the SECOND changes.
+   *
+   * The interval still ticks at 100ms so the display never lags a boundary by more than
+   * that — but it now stores the whole second, so nine ticks in ten are a no-op instead
+   * of re-rendering the card. The card contains the transcript, and during grounding that
+   * transcript is being rebuilt by streaming chunks at the same time; ten renders a second
+   * on top of that is most of what "animating a lot" was.
+   */
+  const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
     if (runStartedAt === null || !showFocus) return;
-    setNow(Date.now());
-    const id = window.setInterval(() => setNow(Date.now()), 100);
+    const read = () => setElapsed(Math.round((Date.now() - runStartedAt) / 1000));
+    read();
+    const id = window.setInterval(read, 100);
     return () => window.clearInterval(id);
   }, [runStartedAt, showFocus]);
 
-  // The transcript follows its own tail as it streams (only when opened).
+  /**
+   * The transcript follows its own tail — WITHOUT animating, and only if the reader is
+   * already at the tail.
+   *
+   * THE FLICKER. This used to run `scrollTo({behavior: "smooth"})` on every change of
+   * `transcriptSize`, which during grounding means every streamed token chunk — dozens a
+   * second. A smooth scroll takes a few hundred milliseconds, so each one was interrupted
+   * and restarted from a new position long before it arrived: the drawer oscillated
+   * instead of scrolling, which is what "flickering, mostly during grounding" is.
+   *
+   * A live log tail should not animate at all. It should stay pinned. So: instant, and
+   * coalesced into one write per frame, so a burst of chunks moves the scroller once.
+   *
+   * And only when the reader is ALREADY within a line or two of the bottom — opening
+   * "Show details" to read something and being yanked back down by the next chunk is the
+   * same bug wearing a different face.
+   */
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const frameRef = useRef<number | null>(null);
   useEffect(() => {
     const el = bodyRef.current;
     if (!el) return;
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    el.scrollTo({ top: el.scrollHeight, behavior: reduced ? "auto" : "smooth" });
+    const NEAR_BOTTOM_PX = 48;
+    const atTail = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+    if (!atTail) return;
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null;
+      el.scrollTop = el.scrollHeight;
+    });
   }, [transcriptSize]);
+  useEffect(() => () => {
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+  }, []);
 
   // A real step beats a rotating placeholder: PLANNING_MESSAGES exists only because the
   // planner used to have nothing true to say for ~60-90s. It stays as the fallback for
@@ -253,7 +292,7 @@ export function WorkingColumn({
               {interpreting ? "Reading your goal…" : working ? "Composing your plan…" : "Wrapping up…"}
             </h2>
             {runStartedAt !== null ? (
-              <span className="focus__elapsed">{Math.round((now - runStartedAt) / 1000)}s</span>
+              <span className="focus__elapsed">{elapsed}s</span>
             ) : null}
           </header>
 
