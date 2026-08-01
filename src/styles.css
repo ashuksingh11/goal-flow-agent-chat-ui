@@ -66,6 +66,15 @@
    ------------------------------------------------------------------------ */
 
 .app {
+  /* TWO DECLARATIONS, AND THE ORDER IS THE POINT (v7.6). `dvh` is Chrome 108 /
+     Safari 15.4; the Family Hub's webview is years older than that, so it drops the
+     line as invalid and the shell falls to height:auto — with `overflow: hidden`
+     below, the app collapses to a short box and the saving overlay (absolute,
+     inset:0 against this element) is clipped to nothing. That is the blank near-white
+     screen reported from the Hub, and the same collapse is why the layout never fills
+     the panel. An engine that knows `dvh` overrides the `vh` line; one that does not
+     keeps a value that works. */
+  height: 100vh;
   height: 100dvh;
   max-width: 1180px;
   margin: 0 auto;
@@ -92,7 +101,7 @@
 /* Short or landscape viewports (a laptop, the presenter's screen) cannot hold the
    full column — give the page its scroll back rather than crushing the cards. */
 @media (max-height: 720px), (max-width: 720px) {
-  .app { height: auto; min-height: 100dvh; overflow: visible; }
+  .app { height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; }
   .column__main { min-height: 0; }
 }
 
