@@ -66,6 +66,15 @@
    ------------------------------------------------------------------------ */
 
 .app {
+  /* TWO DECLARATIONS, AND THE ORDER IS THE POINT (v7.6). `dvh` is Chrome 108 /
+     Safari 15.4; the Family Hub's webview is years older than that, so it drops the
+     line as invalid and the shell falls to height:auto — with `overflow: hidden`
+     below, the app collapses to a short box and the saving overlay (absolute,
+     inset:0 against this element) is clipped to nothing. That is the blank near-white
+     screen reported from the Hub, and the same collapse is why the layout never fills
+     the panel. An engine that knows `dvh` overrides the `vh` line; one that does not
+     keeps a value that works. */
+  height: 100vh;
   height: 100dvh;
   max-width: 1180px;
   margin: 0 auto;
@@ -74,6 +83,8 @@
   flex-direction: column;
   gap: 1rem;
   overflow: hidden;
+  /* The containing block for the saving screen's full-surface takeover (v7). */
+  position: relative;
 }
 
 .column { display: flex; gap: 1rem; flex: 1; min-height: 0; }
@@ -90,7 +101,7 @@
 /* Short or landscape viewports (a laptop, the presenter's screen) cannot hold the
    full column — give the page its scroll back rather than crushing the cards. */
 @media (max-height: 720px), (max-width: 720px) {
-  .app { height: auto; min-height: 100dvh; overflow: visible; }
+  .app { height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; }
   .column__main { min-height: 0; }
 }
 
@@ -768,6 +779,78 @@ summary:focus-visible {
 }
 
 /* --- hand-off banner (v3.1-M2): after approval, the goal lives on the board --- */
+/* v7 — THE SAVING SCREEN, and it is a screen rather than a banner on purpose.
+   The tap that reaches it is the last one in the create phase: the goal is leaving this
+   surface for the board, and the webview is about to disappear. A footer note under a
+   plan the user has finished with would be read as one more thing to read; a takeover
+   says "this conversation is over, the work has moved" — which is exactly what happened.
+   It also has to carry a wait that is sometimes a second (Act 1) and sometimes a minute
+   (Act 3, while another goal re-plans), so it must be able to hold the eye. */
+.saving {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 2rem 1.75rem;
+  text-align: center;
+  background: var(--bg);
+  animation: saving-in 220ms ease-out both;
+}
+@keyframes saving-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .saving { animation: none; }
+}
+.saving__spinner {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid var(--accent);
+  border-top-color: transparent;
+  animation: saving-spin 900ms linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Still says "in flight" without moving: a spinner is decoration, the fact is not. */
+  .saving__spinner { animation: none; border-top-color: var(--accent-soft); }
+}
+@keyframes saving-spin { to { transform: rotate(360deg); } }
+.saving__body { display: flex; flex-direction: column; gap: 0.4rem; max-width: 30rem; }
+.saving__title { font-size: 1.15rem; font-weight: 700; color: var(--ink); }
+.saving__detail { font-size: 0.95rem; line-height: 1.55; color: var(--ink-dim); }
+
+/* The indeterminate bar. It travels rather than fills, because there is no percentage
+   to be honest about — the wait is however long the other goal's re-plan takes. */
+.saving__track {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 4px;
+  margin-top: 0.9rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+}
+.saving__bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 38%;
+  border-radius: inherit;
+  background: var(--accent);
+  animation: saving-sweep 1400ms cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+@keyframes saving-sweep {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(363%); }  /* 100/38 + 100 — clears its own width */
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Motion off, meaning kept: a full-width wash still reads as "busy", where a stopped
+     bar frozen at 38% would read as "stuck at a third". */
+  .saving__bar { animation: none; width: 100%; opacity: 0.55; }
+}
+
 .handoff {
   margin: 0.75rem 1.25rem calc(1rem + env(safe-area-inset-bottom));
   display: flex;

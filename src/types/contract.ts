@@ -195,7 +195,20 @@ export interface AgentPhaseEvent extends AgentEventBase {
 /** A fragment of the model's reasoning → append to the live thinking stream. */
 export interface AgentThinkingEvent extends AgentEventBase {
   event: "thinking";
-  payload: { text: string };
+  payload: {
+    /** Always present. For a step this is "step — detail", so it reads as a sentence. */
+    text: string;
+    /**
+     * v7. Absent means "narration", which is every thinking event emitted before v7.
+     * A "step" is WHOLE on arrival — render it immediately rather than accumulating
+     * chunks and guessing where one thought ends.
+     */
+    kind?: "narration" | "step" | "notice";
+    /** v7, kind="step": the headline. */
+    step?: string;
+    /** v7, kind="step": the sub-line under it. */
+    detail?: string;
+  };
 }
 
 /** The LLM is calling a capability function → pop in a running tool chip. */
@@ -302,6 +315,15 @@ export interface PlanItem {
   why: string[];
   /** Free-form badges ("waste-win", "veg", "prep"). */
   tags: string[];
+  /**
+   * v7. Absent or "planned" is a normal row; "skipped" is a day deliberately left
+   * empty — still rendered, styled down, carrying its reason. Deleting the row was
+   * the alternative and it is worse: a shorter plan says nothing about WHY it got
+   * shorter, and reads as data loss rather than a decision.
+   */
+  status?: "planned" | "skipped";
+  /** Why it is skipped, in the user's terms — "you're away · from Get my home ready". */
+  status_reason?: string;
 }
 
 /**
@@ -350,6 +372,20 @@ export interface PlanPayload {
   impact: ImpactBadge[];
   demo_events?: DemoEvent[];
   explanation: string;
+  /** v7: how many options the planner weighed before choosing. Absent is normal. */
+  considered?: number;
+  /**
+   * v7: what it weighed and did NOT take. Model-authored and display-only —
+   * nothing reads it, and a wrong reason costs a wrong sentence. A lookup table
+   * cannot reject, which is why this is the clearest evidence of reasoning here.
+   */
+  rejected?: RejectedOption[];
+}
+
+/** One option the planner considered and did not take, and why (v7). */
+export interface RejectedOption {
+  option: string;
+  reason: string;
 }
 
 /** Device → cloud. The UI sees its relayed twin, PresentPlan. */
@@ -391,10 +427,17 @@ export interface UnderstandingPayload {
   /** Display-ready hard-constraint chips, same shape as PresentPlan payload.knew. */
   knew: PlanKnew;
   /**
-   * v6, ADDITIVE: the provenance behind the chips — one row per applied
-   * constraint.
+   * v6, ADDITIVE: the provenance behind the chips — one row per applied HARD
+   * constraint, and (v7) only the ones this domain displays, so these line up
+   * one-for-one with `knew`.
    */
   constraints?: AppliedConstraint[];
+  /**
+   * v7, ADDITIVE: the SOFT half — one row per preference entry, rendered as its
+   * own lighter section. A preference shapes the plan and can never block it, so
+   * it must not look like a constraint chip. Empty is normal.
+   */
+  preferences?: AppliedPreference[];
   /**
    * v6-M4: household rules the user just STATED, offered for confirmation. The
    * cloud proposes; only the ids sent back in `accepted_constraint_ids` are ever
@@ -425,12 +468,29 @@ export interface ProposedConstraint {
 /** Where one applied constraint came from, and why it was picked for this goal. */
 export interface AppliedConstraint {
   id: string;
+  /** v7: the store kind ("allergens", "away_window") — used to pair a row with its chip. */
+  kind?: string;
   label: string;
   /** Already display-formatted by the cloud ("$1500", "21:30–07:00"). */
   value: string;
   enforcement: "hard" | "soft";
   source: "account" | "derived" | "chat";
   /** "always enforced" | "domain" | "household default" | "relevance" | "tagged" */
+  why: string;
+}
+
+/**
+ * One preference the plan is biased toward (v7). Deliberately NOT an
+ * AppliedConstraint: there is no `enforcement` field because there is nothing to
+ * enforce, and a shared type would invite a renderer to treat the two alike.
+ */
+export interface AppliedPreference {
+  id: string;
+  label: string;
+  /** Already display-formatted by the cloud ("prefer white meat, chicken turkey fish over red meat"). */
+  value: string;
+  source: "account" | "derived" | "chat";
+  /** "relevance" | "tagged" — how this preference was picked for this goal. */
   why: string;
 }
 
@@ -571,14 +631,17 @@ export interface Status {
 // ---------------------------------------------------------------------------
 
 /**
- * A terminal, non-plan message. Sent when the graph ends before any device
- * dispatch — today, when the interpreter declines an out-of-scope goal
- * (GoalFlow only acts on meal plans + guest dinners).
+ * A non-plan message about a goal.
+ *
+ * Terminal for "out_of_scope" and "declined" — the graph ended before any device
+ * dispatch. NOT terminal for v7's "updating_goals", which arrives mid-save to caption
+ * the saving screen while the cloud updates the user's OTHER goals; a consumer that
+ * clears its stage on every notice would tear down the screen this one describes.
  */
 export interface Notice {
   type: "notice";
   goal_id: string;
-  kind: "out_of_scope" | "declined";
+  kind: "out_of_scope" | "declined" | "updating_goals";
   message: string;
 }
 
@@ -602,6 +665,8 @@ export interface Notice {
 export interface ChatUiOpen {
   type: "chat_ui_open";
   goal_id: string;
+  /** What the user said, verbatim (v7.4). Optional — a pre-v7.4 cloud omits it. */
+  goal_text?: string;
 }
 
 export interface ChatUiClose {

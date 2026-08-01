@@ -16,13 +16,22 @@
  */
 
 import { useState } from "react";
-import type { PlanKnew, ProposedConstraint } from "../types/contract";
+import type {
+  AppliedConstraint,
+  AppliedPreference,
+  PlanKnew,
+  ProposedConstraint,
+} from "../types/contract";
 import { knewValue } from "./PlanCard";
 
 export interface UnderstandingCardProps {
   objective: string;
   constraints: PlanKnew;
   thought: string;
+  /** v6: provenance behind the chips. Shown as a caption inside each chip. */
+  applied?: AppliedConstraint[];
+  /** v7: the soft half — shown as its own lighter section below the chips. */
+  preferences?: AppliedPreference[];
   /** v6-M4: household rules the user just stated, offered for confirmation. */
   proposed?: ProposedConstraint[];
   /** v6-M4: this gate is only about the rules — no plan is coming. */
@@ -60,10 +69,32 @@ function labelOf(key: string): string {
   return key.replace(/[_-]+/g, " ").toUpperCase();
 }
 
+/**
+ * Chip key → store kind, for the two the cloud renames on the way out. Everything
+ * else is already its own kind. Kept tiny and explicit: the alternative is guessing
+ * from the label, and a wrong guess attaches the wrong provenance to a safety chip.
+ */
+const CHIP_KIND: Record<string, string> = {
+  "peak tariff": "peak_hours",
+  away: "away_window",
+};
+
+/**
+ * "account" → "Account · always enforced". The source is where the rule came from,
+ * the why is how it reached THIS goal; together they are the whole answer to "why am
+ * I being told this", which is the question a chip nobody can trace provokes.
+ */
+function provenanceLine(row: { source: string; why: string }): string {
+  const source = row.source ? row.source[0].toUpperCase() + row.source.slice(1) : "";
+  return [source, row.why].filter(Boolean).join(" · ");
+}
+
 export function UnderstandingCard({
   objective,
   constraints,
   thought,
+  applied = [],
+  preferences = [],
   proposed = [],
   captureOnly = false,
   onConfirm,
@@ -73,6 +104,14 @@ export function UnderstandingCard({
   const chips = Object.entries(constraints)
     .map(([key, value]) => [key, knewValue(value)] as const)
     .filter(([, text]) => text !== "");
+
+  // Chip keys are display labels ("peak tariff"), provenance rows carry store kinds
+  // ("peak_hours"), so the two are paired through CHIP_KIND rather than by identity.
+  // A key with no entry there simply gets no caption — that is the normal case for
+  // anything the resolver did not source from a store entry, and inventing a
+  // provenance line would be worse than leaving it out.
+  const provenanceByKind = new Map(applied.filter((row) => row.kind).map((row) => [row.kind!, row]));
+  const provenanceFor = (chipKey: string) => provenanceByKind.get(CHIP_KIND[chipKey] ?? chipKey);
 
   // Ticked by default: the user just SAID this, so pre-selecting matches what they
   // asked for and confirming is one click. It is still an explicit tick they can
@@ -103,6 +142,7 @@ export function UnderstandingCard({
           <ul className="constraints__grid">
             {chips.map(([key, text]) => {
               const { icon, tone } = familyOf(key);
+              const row = provenanceFor(key);
               return (
                 <li key={key} className={`constraint constraint--${tone}`}>
                   <span className="constraint__icon" aria-hidden>
@@ -111,10 +151,31 @@ export function UnderstandingCard({
                   <span className="constraint__body">
                     <span className="constraint__label">{labelOf(key)}</span>
                     <strong className="constraint__value">{text}</strong>
+                    {row ? <span className="constraint__source">{provenanceLine(row)}</span> : null}
                   </span>
                 </li>
               );
             })}
+          </ul>
+        </section>
+      ) : null}
+
+      {preferences.length > 0 ? (
+        <section className="prefs" aria-label="Preferences">
+          <header className="constraints__head">
+            <span className="panel-eyebrow">Preferences</span>
+            <span className="panel-meta">{preferences.length} applied</span>
+          </header>
+          <p className="prefs__note">Preferences shape the plan. They never block it.</p>
+          <ul className="prefs__list">
+            {preferences.map((pref) => (
+              <li key={pref.id} className="pref">
+                <span className="pref__body">
+                  <strong className="pref__label">{pref.label}</strong>
+                  <span className="pref__source">{provenanceLine(pref)}</span>
+                </span>
+              </li>
+            ))}
           </ul>
         </section>
       ) : null}

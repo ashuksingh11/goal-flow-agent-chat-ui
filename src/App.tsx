@@ -28,8 +28,7 @@
  *   │   ├── PlanColumn    — the plan forming, then PlanCard + ProposalList
  *   │   └── StatusTimeline— quiet sustain ticks (monitoring)
  *   ├── UnderstandingCard — the pre-planning confirm gate
- *   ├── handoff banner    — "Plan approved — continue on your Board" (v3.1)
- *   └── PresenterFeed     — raw WS frames ("Show agent flow" toggle)
+ *   └── handoff banner    — "Plan approved — continue on your Board" (v3.1)
  *
  * All inbound frames flow through ONE pure reducer (reduceInbound) — the
  * streaming-event → UI-state mapping lives there and nowhere else. The reducer still
@@ -39,9 +38,7 @@
 
 import { useEffect, useReducer, useRef, useState } from "react";
 import { GoalBar } from "./components/GoalBar";
-import { HarnessTheater } from "./components/HarnessTheater";
 import { PlanColumn } from "./components/PlanColumn";
-import { PresenterFeed } from "./components/PresenterFeed";
 import { StatusTimeline } from "./components/StatusTimeline";
 import { WorkingColumn } from "./components/WorkingColumn";
 import { UnderstandingCard } from "./components/UnderstandingCard";
@@ -80,7 +77,6 @@ import type {
   DemoClock,
   EventChip,
   DraftPlanItem,
-  FlowFrame,
   HarnessState,
   ProposalStatusMap,
   RailPhase,
@@ -149,12 +145,32 @@ interface UiState {
   firingEventId: string | null;
   /** Unlocks the world-event strip after the user approves the initial plan. */
   approved: boolean;
+  /**
+   * v7: the moment between "Approve & Save" and the webview closing.
+   *
+   * It existed before and was invisible. The cloud's chat_ui_close arrives within a
+   * round-trip of the approval, so the UI reset before the user could read anything —
+   * which meant the execution status frames (what actually ran, what was deferred,
+   * what was blocked) landed on a surface that had already gone. Now the surface holds
+   * for a minimum dwell, and for Act 3 it holds for as long as the cross-goal update
+   * genuinely takes, because the cloud does that work BEFORE it sends the close.
+   */
+  saving: { startedAt: number; detail: string | null } | null;
+  /** A close that arrived before the saving dwell was up; applied when it expires. */
+  pendingClose: string | null;
+  /**
+   * v7: a refusal, shown where every other answer is shown.
+   *
+   * Until v7 an out-of-scope goal never opened this surface at all — the cloud returned
+   * before the create bracket — so on the Hub the user asked the fridge for something and
+   * the fridge's screen showed nothing. A refusal is an answer. The cloud closes the
+   * bracket a few seconds later, so there is no dismiss button: nothing here needs doing.
+   */
+  declined: string | null;
   /** Sustain ticks for StatusTimeline (capped). */
   ticks: Status[];
   demoClock: DemoClock;
   transcript: TranscriptEntry[];
-  /** Raw feed for PresenterFeed (capped). */
-  frames: FlowFrame[];
   /** Last applied agent_event seq (order/dedupe on reconnect). */
   lastSeq: number;
   nextId: number;
@@ -197,10 +213,12 @@ const INITIAL_STATE: UiState = {
   firedEventIds: [],
   firingEventId: null,
   approved: false,
+  saving: null,
+  pendingClose: null,
+  declined: null,
   ticks: [],
   demoClock: INITIAL_DEMO_CLOCK,
   transcript: [],
-  frames: [],
   lastSeq: 0,
   nextId: 1,
   boundDeviceId: null,
@@ -224,19 +242,20 @@ type UiAction =
   | { type: "decisions_sent"; decisions: ApprovalDecision[] }
   | { type: "event_fired"; eventId: string }
   | { type: "event_timeout"; eventId: string }
+  | { type: "close_now" }
   | { type: "demo_reset" };
 
-const MAX_FRAMES = 120;
-const MAX_TICKS = 40;
+/**
+ * How long "Saving…" stays up at minimum (v7).
+ *
+ * Not a delay for its own sake: the cloud does the cross-goal work BEFORE it closes the
+ * webview, so in Act 3 this screen is up for exactly as long as that takes and the floor
+ * never binds. It binds in Act 1, where saving really is instant and a flash of a screen
+ * nobody can read is worse than no screen at all.
+ */
+const MIN_SAVING_MS = 1400;
 
-function pushFrame(state: UiState, direction: FlowFrame["direction"], message: FlowFrame["message"]): UiState {
-  const frame: FlowFrame = { id: state.nextId, direction, at: Date.now(), message };
-  return {
-    ...state,
-    nextId: state.nextId + 1,
-    frames: [...state.frames.slice(-(MAX_FRAMES - 1)), frame],
-  };
-}
+const MAX_TICKS = 40;
 
 /** agent_event → live stream entries (the "watch it think" reduction). */
 function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
@@ -260,6 +279,31 @@ function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
       // its own engine said. `activeModule` is the PAINTED engine and lags by the render
       // floor, which would file grounding's narration under whichever card is on screen.
       const engine = next.harness.wireActive;
+
+      // v7 — A STEP IS NOT A FRAGMENT. It arrives whole, so it is never merged with what
+      // came before and never touched by the blob-stripping below; those heuristics exist
+      // only because prose and JSON share one untyped channel, and a step does not.
+      const thinkingKind = event.payload.kind;
+      if (thinkingKind === "step" || thinkingKind === "notice") {
+        const step = event.payload.step ?? event.payload.text;
+        if (!step.trim()) return next;
+        return {
+          ...next,
+          nextId: next.nextId + 1,
+          agentEntries: [
+            ...next.agentEntries,
+            {
+              kind: "step",
+              id: next.nextId,
+              step,
+              detail: event.payload.detail,
+              tone: thinkingKind === "notice" ? "notice" : "step",
+              engine,
+            },
+          ],
+        };
+      }
+
       const last = next.agentEntries[next.agentEntries.length - 1];
       const sameEngine = last?.kind === "thinking" && (last.engine ?? null) === engine;
       const merged = sameEngine && last?.kind === "thinking" ? last.text + event.payload.text : event.payload.text;
@@ -268,7 +312,7 @@ function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
       // dropped precisely the chunks holding the braces and kept everything between
       // them — a JSON blob rendered as mangled pseudo-prose. A blob can only be
       // recognised once the text is whole, so the filtering moved to buildTranscript
-      // (lib/reasoning.ts) and the raw stream stays intact for the presenter feed.
+      // (lib/reasoning.ts) and the raw stream stays intact underneath.
       if (sameEngine && last?.kind === "thinking") {
         // consecutive fragments from the SAME engine accumulate into one block
         return { ...next, agentEntries: [...next.agentEntries.slice(0, -1), { ...last, text: merged }] };
@@ -416,6 +460,47 @@ function boundDeviceOnline(boundId: string | null, choices: DeviceInfo[] | null)
   return choices.some((device) => device.device_id === boundId);
 }
 
+/**
+ * The create phase for the active goal terminated (approval / declined gate / terminal
+ * error) → back to the idle waiting state. The board owns the goal now.
+ *
+ * Extracted in v7 because two paths reach it: the cloud's `chat_ui_close`, and the timer
+ * that applies a close which arrived while the saving screen was still up.
+ */
+function closeCreatePhase(state: UiState): UiState {
+  return {
+    ...state,
+        activeGoalId: null,
+        understanding: null,
+        goalText: "",
+        phase: null,
+        working: false,
+        agentEntries: [],
+        harness: INITIAL_HARNESS,
+        draftItems: [],
+        draftQueue: [],
+        draftHoldUntil: 0,
+        draftTotal: null,
+        plan: null,
+        pristinePlan: null,
+        changedPlanIds: [],
+        planMorphs: {},
+        morphSeq: 0,
+        changedImpactLabels: [],
+        proposalStatuses: {},
+        adaptations: [],
+        eventChips: [],
+        firedEventIds: [],
+        firingEventId: null,
+        approved: false,
+        ticks: [],
+        lastSeq: 0,
+    saving: null,
+    pendingClose: null,
+    declined: null,
+  };
+}
+
 /** The single inbound-frame → UI-state mapping (see ARCHITECTURE.md table). */
 function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
   if ("goal_id" in message && message.goal_id === state.declinedGoalId) {
@@ -481,9 +566,19 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
       };
 
     case "notice":
-      // Terminal, non-plan message (e.g. an out-of-scope decline). The goal
-      // never reached the device — clear the stage and surface the redirect as a
-      // prominent transcript note (activeGoalId=null lets the note render).
+      // v7: NOT every notice is terminal. "updating_goals" arrives mid-save, while the
+      // saving screen is deliberately still up, and says what the cloud is doing to the
+      // user's OTHER goals. Clearing the stage on it would tear down the very screen it
+      // is captioning.
+      if (message.kind === "updating_goals") {
+        return withGoal.saving
+          ? { ...withGoal, saving: { ...withGoal.saving, detail: message.message } }
+          : withGoal;
+      }
+      // Terminal, non-plan message. The goal never reached the device — clear the stage
+      // and show the refusal as the surface's whole content (v7). activeGoalId is KEPT so
+      // the cloud's timed close still matches this goal; the strict create-phase filter
+      // would otherwise drop it and the webview would hang on the refusal forever.
       return {
         ...withGoal,
         nextId: withGoal.nextId + 1,
@@ -491,7 +586,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
           ...withGoal.transcript,
           { kind: "note", id: withGoal.nextId, text: message.message },
         ],
-        activeGoalId: null,
+        declined: message.message,
         declinedGoalId: message.goal_id,
         understanding: null,
         goalText: "",
@@ -534,8 +629,12 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         ...state,
         activeGoalId: message.goal_id,
         declinedGoalId: null,
+        declined: null,
         understanding: null,
-        goalText: "",
+        // v7.4: the open now carries what the user SAID, and it arrives ~10-60s before
+        // the understanding does. Without it the bar reads "Waiting for a goal…" for the
+        // whole interpretation — while the goal it is waiting for is the one being read.
+        goalText: message.goal_text ?? "",
         phase: "interpreting",
         working: true,
         agentEntries: [],
@@ -562,38 +661,14 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
     }
 
     case "chat_ui_close":
-      // The create phase for the active goal terminated (approval / declined gate /
-      // terminal error) → return to the idle waiting state. The board owns the goal
-      // now. (The strict filter above already dropped a close for any other goal;
-      // the post-approval handoff banner was the pre-close beat.)
-      return {
-        ...withGoal,
-        activeGoalId: null,
-        understanding: null,
-        goalText: "",
-        phase: null,
-        working: false,
-        agentEntries: [],
-        harness: INITIAL_HARNESS,
-        draftItems: [],
-        draftQueue: [],
-        draftHoldUntil: 0,
-        draftTotal: null,
-        plan: null,
-        pristinePlan: null,
-        changedPlanIds: [],
-        planMorphs: {},
-        morphSeq: 0,
-        changedImpactLabels: [],
-        proposalStatuses: {},
-        adaptations: [],
-        eventChips: [],
-        firedEventIds: [],
-        firingEventId: null,
-        approved: false,
-        ticks: [],
-        lastSeq: 0,
-      };
+      // v7: HOLD IT while the saving screen is up. The cloud closes within a round-trip
+      // of the approval, which used to wipe the surface before anyone could read it —
+      // and took the execution status frames with it. The close is remembered and
+      // applied when the dwell expires (see the effect that dispatches close_now).
+      if (withGoal.saving && Date.now() - withGoal.saving.startedAt < MIN_SAVING_MS) {
+        return { ...withGoal, pendingClose: message.goal_id };
+      }
+      return closeCreatePhase(withGoal);
 
     case "present_plan":
       return {
@@ -738,10 +813,11 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
 function reducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
     case "recv":
-      return reduceInbound(pushFrame(state, "recv", action.message), action.message);
+      return reduceInbound(state, action.message);
 
     case "sent":
-      return pushFrame(state, "sent", action.message);
+      // Nothing to record: the raw-frame buffer went with the Flow panel (v7.7).
+      return state;
 
     case "harness_tick":
       // Show the next queued harness beat (paced — see HARNESS_ACTIVE_FLOOR_MS).
@@ -827,6 +903,9 @@ function reducer(state: UiState, action: UiAction): UiState {
         lastSeq: 0,
       };
 
+    case "close_now":
+      return closeCreatePhase(state);
+
     case "decisions_sent": {
       const proposalStatuses = { ...state.proposalStatuses };
       for (const decision of action.decisions) {
@@ -840,7 +919,15 @@ function reducer(state: UiState, action: UiAction): UiState {
       // The event strip unlocks once the user has approved every approval-required
       // proposal on the initial plan. Pending approvals count because the user
       // has acted on the plan CTA; later status frames only confirm execution.
-      return { ...state, proposalStatuses, approved: isPlanApproved(state.plan, proposalStatuses) };
+      const approved = isPlanApproved(state.plan, proposalStatuses);
+      return {
+        ...state,
+        proposalStatuses,
+        approved,
+        // v7: hold the surface. Everything the device reports about what actually ran
+        // arrives AFTER this tap, and used to land on a UI the close had already wiped.
+        saving: approved ? { startedAt: Date.now(), detail: null } : state.saving,
+      };
     }
 
     case "event_fired":
@@ -900,9 +987,24 @@ export default function App() {
   const socketRef = useRef<GoalFlowSocket | null>(null);
   const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
   const [connection, setConnection] = useState<ConnectionState>("connecting");
-  const [presenterMode, setPresenterMode] = useState(false);
-  // v5: full-screen "harness theater" for projecting the pipeline on stage.
-  const [theaterMode, setTheaterMode] = useState(false);
+  /**
+   * Apply a close that arrived while "Saving…" was still up (v7).
+   *
+   * The cloud closes the webview within a round-trip of the approval, so without this
+   * the screen that reports what was saved is destroyed before it can be read — and the
+   * execution status frames land on a surface that is already gone.
+   */
+  useEffect(() => {
+    if (!state.pendingClose || !state.saving) return;
+    const remaining = MIN_SAVING_MS - (Date.now() - state.saving.startedAt);
+    if (remaining <= 0) {
+      dispatch({ type: "close_now" });
+      return;
+    }
+    const id = window.setTimeout(() => dispatch({ type: "close_now" }), remaining);
+    return () => window.clearTimeout(id);
+  }, [state.pendingClose, state.saving]);
+
 
   useEffect(() => {
     const socket = createGoalFlowSocket({
@@ -1161,30 +1263,28 @@ export default function App() {
     <div className="app">
       <GoalBar
         goal={goalText}
-        eyebrow={state.understanding?.payload.capture_only ? "REMEMBERING" : undefined}
+        eyebrow={
+          state.understanding?.payload.capture_only
+            ? "REMEMBERING"
+            : // v7.4: the bracket now opens BEFORE interpretation, so for the first
+              // 10-60s the default "PLANNING" would be describing a phase that has not
+              // begun — the cloud is still working out what was asked.
+              state.phase === "interpreting" && !state.understanding && !state.plan
+              ? "READING"
+              : undefined
+        }
         fallback={state.plan ? "Your plan" : "Waiting for a goal…"}
         startedAt={runStartedAt}
         endedAt={runEndedAt}
         cleared={enginesCleared}
         total={engineTotal}
         deviceLabel={pairedDevice?.device_name ?? state.boundDeviceId}
+        deviceCount={state.deviceChoices?.length ?? 0}
         connection={connection}
         onChangeDevice={() => dispatch({ type: "open_picker" })}
-        theater={theaterMode}
-        onTheater={setTheaterMode}
-        presenter={presenterMode}
-        onPresenter={setPresenterMode}
       />
 
-      {/* v5 presenter theater: full-bleed harness pipeline for the stage. Replaces the
-          normal column while the agent works; falls back to the column otherwise. */}
-      {theaterMode &&
-      !state.understanding &&
-      (!state.plan || harnessDraining) &&
-      (state.working || harnessDraining || state.harness.activeModule) ? (
-        <HarnessTheater harness={state.harness} goalText={goalText} />
-      ) : (
-        <main className={presenterMode ? "column column--with-feed" : "column"}>
+      <main className="column">
           <div className="column__main">
             {boundOfflineReconnecting ? (
               <p className="device-offline-note" role="status" aria-live="polite">
@@ -1203,11 +1303,29 @@ export default function App() {
               <p className="transcript-note">{latestNote.text}</p>
             ) : null}
 
+            {/* v7 — THE REFUSAL, given a surface. Shown where every other answer is
+                shown, and with no dismiss button: the cloud closes the bracket a few
+                seconds later, and asking someone to acknowledge a "no" would be the
+                interface inventing work. */}
+            {state.declined ? (
+              <article className="declined" aria-label="Not something this home can do">
+                <header className="declined__head">
+                  <span className="declined__mark" aria-hidden>🤔</span>
+                  <h2 className="declined__title">That one isn't mine to take</h2>
+                </header>
+                {goalText ? <p className="declined__quote">“{goalText}”</p> : null}
+                <p className="declined__body">{state.declined}</p>
+                <p className="declined__foot">Nothing was created on your board.</p>
+              </article>
+            ) : null}
+
             {state.understanding ? (
               <UnderstandingCard
                 objective={state.understanding.payload.objective}
                 constraints={state.understanding.payload.knew}
                 thought={state.understanding.payload.thought}
+                applied={state.understanding.payload.constraints}
+                preferences={state.understanding.payload.preferences}
                 proposed={state.understanding.payload.proposed_constraints}
                 captureOnly={state.understanding.payload.capture_only}
                 onConfirm={(acceptedIds) => sendUnderstanding(true, acceptedIds)}
@@ -1243,12 +1361,43 @@ export default function App() {
 
             {state.ticks.length > 0 ? <StatusTimeline ticks={state.ticks} /> : null}
           </div>
+      </main>
 
-          {presenterMode ? <PresenterFeed frames={state.frames} /> : null}
-        </main>
-      )}
-
-      {state.approved ? (
+      {/* v7 — THE SAVING SCREEN. Replaces the hand-off banner while the save is in
+          flight: the banner said what WOULD happen next, and this says what is
+          happening now. In Act 1 it is up for the dwell floor; in Act 3 it is up for as
+          long as the cross-goal update takes, because the cloud does that work before
+          it closes the webview. */}
+      {state.saving ? (
+        <div className="saving" role="status" aria-live="polite">
+          <span className="saving__spinner" aria-hidden="true" />
+          <div className="saving__body">
+            <strong className="saving__title">
+              {state.saving.detail
+                ? "Saving this goal, and updating your other goals…"
+                : "Saving your plan to the device AI board"}
+            </strong>
+            <span className="saving__detail">
+              {state.saving.detail ??
+                "Your Family Hub takes it from here — it tracks progress, watches the world, and asks you on the board if anything needs to change."}
+            </span>
+            {/* INDETERMINATE, and it has to be: the cloud holds this screen until the
+                OTHER goal has actually re-planned, and nobody — not the chat, not the
+                cloud — knows how long that will take. A bar that filled to a percentage
+                would be inventing one. This says "in flight", for as long as it is,
+                which over the 20-30s of Act 3 is what a lone spinner was failing to
+                carry. */}
+            <div
+              className="saving__track"
+              role="progressbar"
+              aria-label="Saving"
+              aria-busy="true"
+            >
+              <span className="saving__bar" />
+            </div>
+          </div>
+        </div>
+      ) : state.approved ? (
         <div className="handoff" role="status">
           <span className="handoff__mark" aria-hidden="true">✓</span>
           <div className="handoff__body">

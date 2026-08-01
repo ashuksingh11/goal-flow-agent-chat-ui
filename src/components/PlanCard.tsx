@@ -134,12 +134,16 @@ export function PlanCard({
           const morph = morphs[item.id];
           const open = openId === item.id;
           const when = formatWhen(item.when) ?? `${String(index + 1).padStart(2, "0")}`;
+          // v7: a day deliberately left empty. STILL RENDERED — deleting the row was the
+          // alternative and it is worse: a shorter plan says nothing about why it got
+          // shorter, and reads as data loss rather than as a decision someone made.
+          const skipped = item.status === "skipped";
 
           return (
             <li
               key={`${item.id}:${isChanged ? morphSeq : 0}`}
               ref={firstChangedId === item.id ? changedRowRef : undefined}
-              className={`day${open ? " day--open" : ""}${isChanged ? " day--morph" : ""}`}
+              className={`day${open ? " day--open" : ""}${isChanged ? " day--morph" : ""}${skipped ? " day--skipped" : ""}`}
             >
               <button
                 type="button"
@@ -162,6 +166,20 @@ export function PlanCard({
                     {morph ? <span className="day__newlabel">New</span> : null}
                     {item.title}
                   </strong>
+                  {/* v7: ALWAYS VISIBLE. `why` has ridden the wire since v2 and lived
+                      inside a collapsed row nobody opens — which is where the one piece
+                      of evidence that something reasoned about this day was kept. */}
+                  {skipped && item.status_reason ? (
+                    <span className="day__why">
+                      <span aria-hidden>✈ </span>
+                      {item.status_reason}
+                    </span>
+                  ) : item.why.length > 0 ? (
+                    <span className="day__why">
+                      <span aria-hidden>↳ </span>
+                      {item.why[0]}
+                    </span>
+                  ) : null}
                 </span>
                 {isChanged ? <span className="day__updated">Updated</span> : null}
                 <i className="day__chevron" aria-hidden />
@@ -172,9 +190,11 @@ export function PlanCard({
               <div className="day__detail" aria-hidden={!open}>
                 <div className="day__inner">
                   {item.detail ? <p className="day__body">{item.detail}</p> : null}
-                  {item.why.length > 0 || item.tags.length > 0 ? (
+                  {item.why.length > 1 || item.tags.length > 0 ? (
                     <div className="day__tags">
-                      {item.why.slice(0, 1).map((reason) => (
+                      {/* The FIRST why is on the row above now; anything further is
+                          supporting detail and stays here. */}
+                      {item.why.slice(1, 3).map((reason) => (
                         <span key={reason} className="tag tag--why">
                           {reason}
                         </span>
@@ -192,6 +212,31 @@ export function PlanCard({
           );
         })}
       </ol>
+
+      {/* v7 — WHAT IT THREW AWAY. A lookup table cannot reject, so this is the clearest
+          evidence on the card that something weighed options. Model-authored and
+          display-only; absent is normal and the block simply does not render. */}
+      {payload.considered || (payload.rejected && payload.rejected.length > 0) ? (
+        <section className="weighed" aria-label="What it considered">
+          <p className="weighed__head">
+            <span aria-hidden>🧠 </span>
+            {payload.considered ? `${payload.considered} options considered` : "Options considered"}
+            {payload.rejected && payload.rejected.length > 0
+              ? ` · ${payload.rejected.length} rejected`
+              : ""}
+          </p>
+          {payload.rejected && payload.rejected.length > 0 ? (
+            <ul className="weighed__list">
+              {payload.rejected.slice(0, 4).map((r) => (
+                <li key={`${r.option}:${r.reason}`} className="weighed__item">
+                  <s>{r.option}</s>
+                  <span className="weighed__reason">{r.reason}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
 
       {payload.impact.length > 0 ? (
         <p className="impact" aria-label="Impact">

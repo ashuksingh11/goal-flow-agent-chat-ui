@@ -36,6 +36,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { HARNESS_PIPELINE, formatEngineMs } from "../types/ui";
 import type { AgentStreamEntry, HarnessState } from "../types/ui";
 import {
+  INTERPRETING_MESSAGES,
   PLANNING_MESSAGES,
   PLANNING_ROTATE_MS,
   buildTranscript,
@@ -98,31 +99,56 @@ export function WorkingColumn({
   // Per-engine for the LIVE line, so the card never captions one engine with another's
   // words — but the whole run for "Show details", which is the record of the thinking and
   // must not reset every time the spotlight moves to the next engine.
-  const transcript = buildTranscript(entries, active ?? undefined);
-  // Memoized because the run clock re-renders this card ~10×/s and the cleaning pass
-  // walks the whole transcript character by character.
+  // Memoized for the same reason `blocks` is: this walks the whole transcript and
+  // `stripJsonBlobs` scans it character by character, and the card re-renders on the run
+  // clock. It was the one of the pair that never got the memo.
+  const transcript = useMemo(() => buildTranscript(entries, active ?? undefined), [entries, active]);
+  // Same reason. (The clock used to re-render this card ~10×/s; since v7.8 it only does so
+  // when the displayed SECOND changes, but streaming chunks still rebuild both of these.)
   const blocks = useMemo(() => buildTranscriptBlocks(entries), [entries]);
   // Cheap identity for "has anything been added": the effect below only needs to know
   // that the text grew, not what it says.
-  const transcriptSize = blocks.reduce((n, b) => n + b.text.length, 0);
-  const activeSpoke = active !== null && blocks.some((b) => b.engine === active);
+  const transcriptSize = blocks.reduce((n, b) => n + b.text.length + b.steps.length, 0);
+  // "Spoke" now means steps OR prose. Without the steps half, the planner — which since
+  // v7 reports its work in steps and still never narrates — would keep claiming silence
+  // directly above the three steps it had just reported.
+  const activeSpoke =
+    active !== null && blocks.some((b) => b.engine === active && (b.text !== "" || b.steps.length > 0));
+  /** The newest step from whichever engine is live — the one-line peek when it has no prose. */
+  const lastStep = blocks
+    .filter((b) => active === null || b.engine === active)
+    .flatMap((b) => b.steps)
+    .at(-1);
   const settling = !harness.settled; // beats still draining, or the settle window is open
   // `working` goes false the moment present_plan lands, which is BEFORE the last beats have
   // been read — the settle window keeps the card alive on its own, or Approval (always the
   // last engine) is torn down within a frame of resolving.
   const showFocus = !compact && (working || active !== null || settling);
 
-  // Planning is one silent ~60-90s call — rotate a line so the card isn't frozen.
+  /**
+   * INTERPRETING (v7.4): the goal has arrived and the CLOUD is reading it, which happens
+   * before the device is involved at all — so there is no active engine, no beat, no
+   * transcript and nothing cleared. Every one of those is also true of a run that has
+   * died, which is why this state has to name itself: for 10-60s the card otherwise sat
+   * on "Composing your plan…" over an empty progress bar, describing a step that had not
+   * started, and looking exactly like a hang.
+   */
+  const interpreting =
+    working && active === null && cleared === 0 && entries.length === 0 && !settling;
+
+  // Planning is one silent ~60-90s call, and interpretation is a silent 10-60s one —
+  // rotate a line through both so the card is never frozen.
   const planning = active === "planner" && working;
+  const rotating = planning || interpreting;
   const [rotation, setRotation] = useState(0);
   useEffect(() => {
-    if (!planning) {
+    if (!rotating) {
       setRotation(0);
       return;
     }
     const id = window.setInterval(() => setRotation((r) => r + 1), PLANNING_ROTATE_MS);
     return () => window.clearInterval(id);
-  }, [planning]);
+  }, [rotating]);
 
   /**
    * Run elapsed, off the earliest beat ARRIVAL (types/ui.ts stamps it on the wire, not at
@@ -135,26 +161,67 @@ export function WorkingColumn({
     );
     return stamps.length > 0 ? Math.min(...stamps) : null;
   }, [harness.engines]);
-  const [now, setNow] = useState(() => Date.now());
+  /**
+   * ELAPSED SECONDS, and it only re-renders when the SECOND changes.
+   *
+   * The interval still ticks at 100ms so the display never lags a boundary by more than
+   * that — but it now stores the whole second, so nine ticks in ten are a no-op instead
+   * of re-rendering the card. The card contains the transcript, and during grounding that
+   * transcript is being rebuilt by streaming chunks at the same time; ten renders a second
+   * on top of that is most of what "animating a lot" was.
+   */
+  const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
     if (runStartedAt === null || !showFocus) return;
-    setNow(Date.now());
-    const id = window.setInterval(() => setNow(Date.now()), 100);
+    const read = () => setElapsed(Math.round((Date.now() - runStartedAt) / 1000));
+    read();
+    const id = window.setInterval(read, 100);
     return () => window.clearInterval(id);
   }, [runStartedAt, showFocus]);
 
-  // The transcript follows its own tail as it streams (only when opened).
+  /**
+   * The transcript follows its own tail — WITHOUT animating, and only if the reader is
+   * already at the tail.
+   *
+   * THE FLICKER. This used to run `scrollTo({behavior: "smooth"})` on every change of
+   * `transcriptSize`, which during grounding means every streamed token chunk — dozens a
+   * second. A smooth scroll takes a few hundred milliseconds, so each one was interrupted
+   * and restarted from a new position long before it arrived: the drawer oscillated
+   * instead of scrolling, which is what "flickering, mostly during grounding" is.
+   *
+   * A live log tail should not animate at all. It should stay pinned. So: instant, and
+   * coalesced into one write per frame, so a burst of chunks moves the scroller once.
+   *
+   * And only when the reader is ALREADY within a line or two of the bottom — opening
+   * "Show details" to read something and being yanked back down by the next chunk is the
+   * same bug wearing a different face.
+   */
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const frameRef = useRef<number | null>(null);
   useEffect(() => {
     const el = bodyRef.current;
     if (!el) return;
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    el.scrollTo({ top: el.scrollHeight, behavior: reduced ? "auto" : "smooth" });
+    const NEAR_BOTTOM_PX = 48;
+    const atTail = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+    if (!atTail) return;
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null;
+      el.scrollTop = el.scrollHeight;
+    });
   }, [transcriptSize]);
+  useEffect(() => () => {
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+  }, []);
 
-  const live = planning
-    ? PLANNING_MESSAGES[rotation % PLANNING_MESSAGES.length]
-    : peek(transcript);
+  // A real step beats a rotating placeholder: PLANNING_MESSAGES exists only because the
+  // planner used to have nothing true to say for ~60-90s. It stays as the fallback for
+  // the stretch before the first step lands.
+  const live =
+    peek(transcript) ||
+    (lastStep ? (lastStep.detail ? `${lastStep.step} — ${lastStep.detail}` : lastStep.step) : "") ||
+    (planning ? PLANNING_MESSAGES[rotation % PLANNING_MESSAGES.length] : "") ||
+    (interpreting ? INTERPRETING_MESSAGES[rotation % INTERPRETING_MESSAGES.length] : "");
   // The drawer shows the same words in full — no reason to preview them at the same time.
   const [detailsOpen, setDetailsOpen] = useState(false);
 
@@ -222,10 +289,10 @@ export function WorkingColumn({
           <header className="focus__head">
             <i className="focus__spinner" aria-hidden />
             <h2 className="focus__title">
-              {working ? "Composing your plan…" : "Wrapping up…"}
+              {interpreting ? "Reading your goal…" : working ? "Composing your plan…" : "Wrapping up…"}
             </h2>
             {runStartedAt !== null ? (
-              <span className="focus__elapsed">{Math.round((now - runStartedAt) / 1000)}s</span>
+              <span className="focus__elapsed">{elapsed}s</span>
             ) : null}
           </header>
 
@@ -268,12 +335,35 @@ export function WorkingColumn({
                     <span className="panel-eyebrow focus__who">
                       {ENGINES.find((e) => e.id === block.engine)?.label ?? "Agent"}
                     </span>
-                    <p className="focus__said">
-                      {block.text}
-                      {working && index === blocks.length - 1 && block.engine === active ? (
-                        <span className="focus__caret" aria-hidden />
-                      ) : null}
-                    </p>
+                    {/* PROSE FIRST, steps under it. The narration is the engine SAYING
+                        what it is about to do ("broke the goal into 8 steps: …") and the
+                        steps are the receipt for it — printing the receipt above the
+                        sentence that announces it reads backwards, and worse, it put the
+                        steps of one engine directly under the previous engine's prose.
+                        The caret still trails the prose, because that is what streams. */}
+                    {block.text ? (
+                      <p className="focus__said">
+                        {block.text}
+                        {working && index === blocks.length - 1 && block.engine === active ? (
+                          <span className="focus__caret" aria-hidden />
+                        ) : null}
+                      </p>
+                    ) : null}
+                    {block.steps.length > 0 ? (
+                      <ol className="focus__steps">
+                        {block.steps.map((s) => (
+                          <li key={s.id} className={`focus__step focus__step--${s.tone}`}>
+                            <span className="focus__step-mark" aria-hidden>
+                              {s.tone === "notice" ? "!" : "✓"}
+                            </span>
+                            <span className="focus__step-body">
+                              <strong className="focus__step-label">{s.step}</strong>
+                              {s.detail ? <span className="focus__step-detail">{s.detail}</span> : null}
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : null}
                   </section>
                 ))}
                 {/* Silence is a fact about the engine, not a gap in the record — say so,
@@ -308,16 +398,23 @@ export function WorkingColumn({
         </article>
       ) : null}
 
-      <section className="pipe" aria-label="Harness pipeline">
-        <header className="pipe__head">
-          <span className="panel-eyebrow">Pipeline</span>
-          <span className="panel-meta">
-            {cleared} of {ENGINES.length} engines cleared
-            {chips.length > 0 ? ` · ${chips.length} tool calls` : ""}
-          </span>
-        </header>
-        {pipeline}
-      </section>
+      {/* The pipeline is the DEVICE's run, so it appears when the device has one.
+          During interpretation it is seven grey rows all saying "queued" under a
+          heading that counts nothing — a full screen of furniture below a card that
+          is the only thing with news. Worse, it invites the reading that seven things
+          are stuck, when the truth is that none of them has been asked to start. */}
+      {interpreting ? null : (
+        <section className="pipe" aria-label="Harness pipeline">
+          <header className="pipe__head">
+            <span className="panel-eyebrow">Pipeline</span>
+            <span className="panel-meta">
+              {cleared} of {ENGINES.length} engines cleared
+              {chips.length > 0 ? ` · ${chips.length} tool calls` : ""}
+            </span>
+          </header>
+          {pipeline}
+        </section>
+      )}
     </section>
   );
 }

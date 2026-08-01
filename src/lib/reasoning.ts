@@ -33,6 +33,23 @@ export const PLANNING_MESSAGES = [
   "Finalizing…",
 ];
 
+/**
+ * The INTERPRETATION window (v7.4) — from "the goal arrived" to "here is what I heard".
+ *
+ * The cloud spends 10-60s on one LLM call here, and it is the least explicable wait in
+ * the product: the user has just spoken, and nothing on the device has started yet, so
+ * there are no engines to light up and no tool calls to show. Until v7.4 the webview was
+ * not even open for it. These lines describe what is genuinely happening — reading the
+ * goal, checking it against what this home can do — and none of them claims a step that
+ * has not begun.
+ */
+export const INTERPRETING_MESSAGES = [
+  "Reading your goal…",
+  "Working out what you're asking for…",
+  "Checking it against what this home can do…",
+  "Almost there…",
+];
+
 export const PLANNING_ROTATE_MS = 3000;
 
 export function statusForPhase(phase: RailPhase | null, active: boolean): string {
@@ -212,7 +229,7 @@ function scanBalanced(text: string, start: number): number {
  * rather than a single truncated latest line.
  *
  * Fragments are accumulated VERBATIM by the reducer (the raw stream stays intact for the
- * presenter feed); the cleaning happens here, where the text is whole.
+ * raw stream); the cleaning happens here, where the text is whole.
  */
 export function buildTranscript(entries: AgentStreamEntry[], engine?: HarnessModule): string {
   const thinking = entries.filter(
@@ -230,8 +247,18 @@ export function buildTranscript(entries: AgentStreamEntry[], engine?: HarnessMod
   return stripJsonBlobs(scoped.map((e) => e.text).join(""));
 }
 
+export interface TranscriptStep {
+  id: number;
+  step: string;
+  detail?: string;
+  tone: "step" | "notice";
+}
+
 export interface TranscriptBlock {
   engine: HarnessModule | null;
+  /** v7: the labelled steps this engine reported, in order. */
+  steps: TranscriptStep[];
+  /** The model's own prose, accumulated and cleaned. Often empty, which is fine. */
   text: string;
 }
 
@@ -244,24 +271,41 @@ export interface TranscriptBlock {
  * planner deliberately never narrates (GoalAgent.ComposeModelPlanAsync keeps the raw plan
  * JSON off the thinking channel), and an unlabelled transcript made that read as a clip.
  *
- * Cleaning is per block: a JSON blob only ever appears inside grounding's own text, so no
- * blob is split across a block boundary.
+ * v7 SPLITS EACH BLOCK IN TWO. `steps` are the labelled beats the device reports and are
+ * the reason the planner is no longer blank; `text` is the model's own voice. They are
+ * kept apart because only the prose needs cleaning — see below.
+ *
+ * Cleaning is per block and only ever touches `text`: a JSON blob only ever appears
+ * inside a model's own narration, so no blob is split across a block boundary and no
+ * step is ever at the mercy of the blob heuristics.
+ *
+ * A block survives if it has EITHER steps or prose. Through v6 it survived only on prose,
+ * which meant a grounding burst that was entirely JSON cleaned to "" and the whole block
+ * vanished — the engine looked like it had said nothing when in fact it had said the most.
  */
 export function buildTranscriptBlocks(entries: AgentStreamEntry[]): TranscriptBlock[] {
-  const thinking = entries.filter(
-    (e): e is Extract<AgentStreamEntry, { kind: "thinking" }> => e.kind === "thinking",
+  const spoken = entries.filter(
+    (e): e is Extract<AgentStreamEntry, { kind: "thinking" | "step" }> =>
+      e.kind === "thinking" || e.kind === "step",
   );
-  const firstAttributed = thinking.find((e) => e.engine)?.engine ?? null;
+  const firstAttributed = spoken.find((e) => e.engine)?.engine ?? null;
   const blocks: TranscriptBlock[] = [];
-  for (const entry of thinking) {
+  for (const entry of spoken) {
     const engine = entry.engine ?? firstAttributed;
-    const last = blocks[blocks.length - 1];
-    if (last && last.engine === engine) last.text += entry.text;
-    else blocks.push({ engine, text: entry.text });
+    let last = blocks[blocks.length - 1];
+    if (!last || last.engine !== engine) {
+      last = { engine, steps: [], text: "" };
+      blocks.push(last);
+    }
+    if (entry.kind === "step") {
+      last.steps.push({ id: entry.id, step: entry.step, detail: entry.detail, tone: entry.tone });
+    } else {
+      last.text += entry.text;
+    }
   }
   return blocks
-    .map((b) => ({ engine: b.engine, text: stripJsonBlobs(b.text) }))
-    .filter((b) => b.text !== "");
+    .map((b) => ({ engine: b.engine, steps: b.steps, text: stripJsonBlobs(b.text) }))
+    .filter((b) => b.steps.length > 0 || b.text !== "");
 }
 
 /** The most recent complete sentence — the one-line summary shown when collapsed. */
