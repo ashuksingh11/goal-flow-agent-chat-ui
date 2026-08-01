@@ -229,7 +229,7 @@ function scanBalanced(text: string, start: number): number {
  * rather than a single truncated latest line.
  *
  * Fragments are accumulated VERBATIM by the reducer (the raw stream stays intact for the
- * presenter feed); the cleaning happens here, where the text is whole.
+ * raw stream); the cleaning happens here, where the text is whole.
  */
 export function buildTranscript(entries: AgentStreamEntry[], engine?: HarnessModule): string {
   const thinking = entries.filter(

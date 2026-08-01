@@ -12,8 +12,6 @@ import type {
   DemoEvent,
   HarnessModule,
   TaskStatus,
-  UiInboundMessage,
-  UiOutboundMessage,
 } from "./contract";
 
 // ---------------------------------------------------------------------------
@@ -182,7 +180,7 @@ export interface HarnessState {
  * their beats (the safety filter vets each tool call during grounding/planning; the
  * task DAG is decomposed before grounding; proposals are registered before the
  * approval beat). So the device emits `active` and its resolve back-to-back with
- * nothing in between but the optional presenter dwell — at the default
+ * nothing in between but the optional harness dwell — at the default
  * HARNESS_DWELL_MS=0 that is the same millisecond, and those three engines flashed
  * past unseen. This is a RENDER floor only: order and total latency stay exactly what
  * the device reported, we just refuse to paint a state change faster than the eye can
@@ -482,7 +480,7 @@ export const TIER_META: Record<
 export interface DemoClock {
   /** Simulated ISO date; null until a status carries one. */
   simDate: string | null;
-  /** Device-provided label, kept for presenter parity; display prefers simDate. */
+  /** Device-provided label; display prefers simDate. */
   dayLabel: string | null;
 }
 
@@ -503,18 +501,10 @@ export function mergeDemoClock(
 }
 
 // ---------------------------------------------------------------------------
-// Transcript + presenter feed
+// Transcript
 // ---------------------------------------------------------------------------
 
 /** Minimal-text transcript: goals the user sent + terse agent notes. */
 export type TranscriptEntry =
   | { kind: "goal"; id: number; text: string }
   | { kind: "note"; id: number; text: string };
-
-/** One raw frame in the presenter "Show agent flow" feed. */
-export interface FlowFrame {
-  id: number;
-  direction: "sent" | "recv";
-  at: number;
-  message: UiInboundMessage | UiOutboundMessage;
-}

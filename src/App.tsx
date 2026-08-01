@@ -28,8 +28,7 @@
  *   │   ├── PlanColumn    — the plan forming, then PlanCard + ProposalList
  *   │   └── StatusTimeline— quiet sustain ticks (monitoring)
  *   ├── UnderstandingCard — the pre-planning confirm gate
- *   ├── handoff banner    — "Plan approved — continue on your Board" (v3.1)
- *   └── PresenterFeed     — raw WS frames ("Show agent flow" toggle)
+ *   └── handoff banner    — "Plan approved — continue on your Board" (v3.1)
  *
  * All inbound frames flow through ONE pure reducer (reduceInbound) — the
  * streaming-event → UI-state mapping lives there and nowhere else. The reducer still
@@ -39,9 +38,7 @@
 
 import { useEffect, useReducer, useRef, useState } from "react";
 import { GoalBar } from "./components/GoalBar";
-import { HarnessTheater } from "./components/HarnessTheater";
 import { PlanColumn } from "./components/PlanColumn";
-import { PresenterFeed } from "./components/PresenterFeed";
 import { StatusTimeline } from "./components/StatusTimeline";
 import { WorkingColumn } from "./components/WorkingColumn";
 import { UnderstandingCard } from "./components/UnderstandingCard";
@@ -80,7 +77,6 @@ import type {
   DemoClock,
   EventChip,
   DraftPlanItem,
-  FlowFrame,
   HarnessState,
   ProposalStatusMap,
   RailPhase,
@@ -175,8 +171,6 @@ interface UiState {
   ticks: Status[];
   demoClock: DemoClock;
   transcript: TranscriptEntry[];
-  /** Raw feed for PresenterFeed (capped). */
-  frames: FlowFrame[];
   /** Last applied agent_event seq (order/dedupe on reconnect). */
   lastSeq: number;
   nextId: number;
@@ -225,7 +219,6 @@ const INITIAL_STATE: UiState = {
   ticks: [],
   demoClock: INITIAL_DEMO_CLOCK,
   transcript: [],
-  frames: [],
   lastSeq: 0,
   nextId: 1,
   boundDeviceId: null,
@@ -262,17 +255,7 @@ type UiAction =
  */
 const MIN_SAVING_MS = 1400;
 
-const MAX_FRAMES = 120;
 const MAX_TICKS = 40;
-
-function pushFrame(state: UiState, direction: FlowFrame["direction"], message: FlowFrame["message"]): UiState {
-  const frame: FlowFrame = { id: state.nextId, direction, at: Date.now(), message };
-  return {
-    ...state,
-    nextId: state.nextId + 1,
-    frames: [...state.frames.slice(-(MAX_FRAMES - 1)), frame],
-  };
-}
 
 /** agent_event → live stream entries (the "watch it think" reduction). */
 function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
@@ -329,7 +312,7 @@ function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
       // dropped precisely the chunks holding the braces and kept everything between
       // them — a JSON blob rendered as mangled pseudo-prose. A blob can only be
       // recognised once the text is whole, so the filtering moved to buildTranscript
-      // (lib/reasoning.ts) and the raw stream stays intact for the presenter feed.
+      // (lib/reasoning.ts) and the raw stream stays intact underneath.
       if (sameEngine && last?.kind === "thinking") {
         // consecutive fragments from the SAME engine accumulate into one block
         return { ...next, agentEntries: [...next.agentEntries.slice(0, -1), { ...last, text: merged }] };
@@ -830,10 +813,11 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
 function reducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
     case "recv":
-      return reduceInbound(pushFrame(state, "recv", action.message), action.message);
+      return reduceInbound(state, action.message);
 
     case "sent":
-      return pushFrame(state, "sent", action.message);
+      // Nothing to record: the raw-frame buffer went with the Flow panel (v7.7).
+      return state;
 
     case "harness_tick":
       // Show the next queued harness beat (paced — see HARNESS_ACTIVE_FLOOR_MS).
@@ -1021,9 +1005,6 @@ export default function App() {
     return () => window.clearTimeout(id);
   }, [state.pendingClose, state.saving]);
 
-  const [presenterMode, setPresenterMode] = useState(false);
-  // v5: full-screen "harness theater" for projecting the pipeline on stage.
-  const [theaterMode, setTheaterMode] = useState(false);
 
   useEffect(() => {
     const socket = createGoalFlowSocket({
@@ -1298,23 +1279,12 @@ export default function App() {
         cleared={enginesCleared}
         total={engineTotal}
         deviceLabel={pairedDevice?.device_name ?? state.boundDeviceId}
+        deviceCount={state.deviceChoices?.length ?? 0}
         connection={connection}
         onChangeDevice={() => dispatch({ type: "open_picker" })}
-        theater={theaterMode}
-        onTheater={setTheaterMode}
-        presenter={presenterMode}
-        onPresenter={setPresenterMode}
       />
 
-      {/* v5 presenter theater: full-bleed harness pipeline for the stage. Replaces the
-          normal column while the agent works; falls back to the column otherwise. */}
-      {theaterMode &&
-      !state.understanding &&
-      (!state.plan || harnessDraining) &&
-      (state.working || harnessDraining || state.harness.activeModule) ? (
-        <HarnessTheater harness={state.harness} goalText={goalText} />
-      ) : (
-        <main className={presenterMode ? "column column--with-feed" : "column"}>
+      <main className="column">
           <div className="column__main">
             {boundOfflineReconnecting ? (
               <p className="device-offline-note" role="status" aria-live="polite">
@@ -1391,10 +1361,7 @@ export default function App() {
 
             {state.ticks.length > 0 ? <StatusTimeline ticks={state.ticks} /> : null}
           </div>
-
-          {presenterMode ? <PresenterFeed frames={state.frames} /> : null}
-        </main>
-      )}
+      </main>
 
       {/* v7 — THE SAVING SCREEN. Replaces the hand-off banner while the save is in
           flight: the banner said what WOULD happen next, and this says what is

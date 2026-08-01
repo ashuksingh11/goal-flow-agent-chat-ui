@@ -6,8 +6,13 @@
  * ProgressRail pair: the phase rail and the harness pipeline were two progress
  * indicators for the same run, and the harness is the one that tells the truth.
  *
- * The demo toggles (Theater / Show agent flow) stay reachable but are deliberately
- * quiet — they are stage machinery, not part of what the agent is doing.
+ * v7.7: the Theater / Flow toggles are gone. They were stage machinery for a demo that
+ * no longer needs them, and on the Hub they were two checkboxes a family could tap into
+ * a state nobody would know how to leave.
+ *
+ * The device chip is CONDITIONAL. It is the affordance for changing the pairing, so it
+ * only earns its place when there is another device to change to — with one device
+ * connected it named the dev machine and did nothing.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -23,16 +28,14 @@ export interface GoalBarProps {
   cleared: number;
   total: number;
   deviceLabel: string | null;
+  /** How many devices the cloud is offering. The chip appears only when it is a CHOICE. */
+  deviceCount: number;
   /** v6-M4: a capture is not a plan — the bar must not say PLANNING over it. */
   eyebrow?: string;
   connection: ConnectionState;
   /** Re-open the device picker. The chip is the affordance — it is the only place
       the pairing is shown, so it has to be the place you can change it. */
   onChangeDevice: () => void;
-  theater: boolean;
-  onTheater: (on: boolean) => void;
-  presenter: boolean;
-  onPresenter: (on: boolean) => void;
   /** Shown when the goal's words are not available (a rehydrated surface). */
   fallback: string;
 }
@@ -50,13 +53,10 @@ export function GoalBar({
   cleared,
   total,
   deviceLabel,
+  deviceCount,
   eyebrow,
   connection,
   onChangeDevice,
-  theater,
-  onTheater,
-  presenter,
-  onPresenter,
   fallback,
 }: GoalBarProps) {
   const [now, setNow] = useState(() => Date.now());
@@ -85,25 +85,21 @@ export function GoalBar({
           {startedAt !== null ? (
             <span className="goalbar__clock">{clock((endedAt ?? now) - startedAt)}</span>
           ) : null}
-          <button
-            type="button"
-            className={`goalbar__device goalbar__device--${connection}`}
-            onClick={onChangeDevice}
-            title="Change the paired device"
-          >
-            <i aria-hidden />
-            {deviceLabel ?? connection}
-          </button>
-          <span className="goalbar__toggles">
-            <label>
-              <input type="checkbox" checked={theater} onChange={(e) => onTheater(e.target.checked)} />
-              Theater
-            </label>
-            <label>
-              <input type="checkbox" checked={presenter} onChange={(e) => onPresenter(e.target.checked)} />
-              Flow
-            </label>
-          </span>
+          {/* One device is not a choice — the chip would be a dev machine's hostname
+              sitting on the family's screen, wired to a picker with one entry. It still
+              appears the moment there is a second device, and whenever the connection is
+              not open, because THEN it is news. */}
+          {deviceCount > 1 || connection !== "open" ? (
+            <button
+              type="button"
+              className={`goalbar__device goalbar__device--${connection}`}
+              onClick={onChangeDevice}
+              title="Change the paired device"
+            >
+              <i aria-hidden />
+              {deviceCount > 1 ? deviceLabel ?? connection : connection}
+            </button>
+          ) : null}
         </div>
       </div>
       <div
