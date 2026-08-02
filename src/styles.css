@@ -111,7 +111,7 @@
   box-sizing: border-box;
 }
 
-/* --- the scrollbar (v8.1) ------------------------------------------------
+/* --- the scrollbar ------------------------------------------------
    The default Chromium bar is a 15px grey channel with a boxy thumb and a
    ruled track — on a screen whose entire design is quiet white cards it was
    the loudest element on it, and it sits directly beside the plan.
@@ -830,7 +830,7 @@ summary:focus-visible {
    It also has to carry a wait that is sometimes a second (Act 1) and sometimes a minute
    (Act 3, while another goal re-plans), so it must be able to hold the eye. */
 .saving {
-  /* FIXED, not absolute (v8.1). It was absolute against `.app` — which is fine
+  /* FIXED, not absolute. It was absolute against `.app` — which is fine
      while `.app` is exactly one viewport tall, and `.app` is not: below 720px of
      height or width the shell drops to `height: auto` and the page scrolls
      (see the media query at the top of this file). Approving is the LAST thing

@@ -70,8 +70,8 @@ export interface WorkingColumnProps {
  * to the last CLAUSE, and let the CSS ellipsis take it from there.
  */
 function peek(text: string): string {
-  // v8.1: markers never reach the one-liner. The collapsed card has room for a single
-  // line, and "⟨context⟩" spends it saying that something was hidden.
+  // Markers never reach the one-liner: the collapsed card has room for one line, and
+  // "⟨context⟩" spends it saying that something was hidden.
   const tail = lastSentence(proseOnly(text)).trim();
   if (tail.length <= 110) return tail;
   return tail.split(/\s*(?:→|;|\|)\s*/).filter(Boolean).pop() ?? tail;

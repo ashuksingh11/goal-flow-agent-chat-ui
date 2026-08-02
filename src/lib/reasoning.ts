@@ -147,20 +147,11 @@ function appendMarker(out: string, marker: string): string {
 /**
  * One line standing in for a redacted blob.
  *
- * v8.1 — IT NO LONGER NAMES THE KEYS. It used to list the blob's top-level fields, which
- * produced things like
- *
- *     ⟨context · constraints, inventory, expiring_items_within_3_days, busy_evenings, …⟩
- *
- * sitting inside a paragraph of prose. Two problems, and the brackets were the smaller
- * one. Those keys are the schema of an internal JSON object — `expiring_items_within_3_days`
- * is a field name, not something a person looked at — so the more faithfully the marker
- * reported them, the more it read as debug output that had escaped into the product.
- *
- * What the reader needs at that moment is one fact: the agent assembled the world context.
- * That is what survives. The marker is now one of three fixed tokens, and
- * {@link splitTranscriptText} turns them into a rendered element rather than leaving
- * angle brackets in the middle of a sentence.
+ * IT DOES NOT NAME THE KEYS. Listing the blob's top-level fields put the schema of an
+ * internal object — `expiring_items_within_3_days` — mid-paragraph, which read as debug
+ * output that had escaped. The reader needs one fact: context was assembled. So the
+ * marker is one of three fixed tokens, and {@link splitTranscriptText} renders them as
+ * an element rather than leaving angle brackets in a sentence.
  */
 function describeBlob(_blob: string): string {
   return CONTEXT_DONE;
