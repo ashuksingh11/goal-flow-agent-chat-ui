@@ -100,10 +100,10 @@ export function stripJsonBlobs(text: string): string {
       // the transcript ended permanently at "⟨context · still arriving…⟩".
       const resume = resumeAfterBlob(text, i);
       if (resume === -1) {
-        out = appendMarker(out, "⟨context · still arriving…⟩");
+        out = appendMarker(out, CONTEXT_STREAMING);
         break; // unterminated AND last: the rest really is the blob, still streaming
       }
-      out = appendMarker(out, "⟨context · partial⟩");
+      out = appendMarker(out, CONTEXT_PARTIAL);
       i = resume;
       continue;
     }
@@ -117,7 +117,7 @@ export function stripJsonBlobs(text: string): string {
       // Residue from a blob that began before this buffer did (e.g. after a reconnect):
       // a line starting with a quoted identifier-like key. Prose does not open a line
       // with `"snake_case":`.
-      .replace(/^[\s,}\]]*"[A-Za-z_][\w]*"\s*:.*$/gm, "⟨context⟩")
+      .replace(/^[\s,}\]]*"[A-Za-z_][\w]*"\s*:.*$/gm, CONTEXT_DONE)
       // Lines that are nothing but JSON punctuation left behind — taken out whole, so
       // they do not leave a blank line behind them. Requires at least one punctuation
       // character, so a genuine paragraph break is never eaten.
@@ -145,26 +145,87 @@ function appendMarker(out: string, marker: string): string {
 }
 
 /**
- * One line standing in for a redacted blob, describing it from its own contents — the
- * top-level keys it carried, or how many entries. Nothing is inferred or invented; if it
- * will not parse (models emit near-JSON), the marker says only that context was gathered.
+ * One line standing in for a redacted blob.
+ *
+ * v8.1 — IT NO LONGER NAMES THE KEYS. It used to list the blob's top-level fields, which
+ * produced things like
+ *
+ *     ⟨context · constraints, inventory, expiring_items_within_3_days, busy_evenings, …⟩
+ *
+ * sitting inside a paragraph of prose. Two problems, and the brackets were the smaller
+ * one. Those keys are the schema of an internal JSON object — `expiring_items_within_3_days`
+ * is a field name, not something a person looked at — so the more faithfully the marker
+ * reported them, the more it read as debug output that had escaped into the product.
+ *
+ * What the reader needs at that moment is one fact: the agent assembled the world context.
+ * That is what survives. The marker is now one of three fixed tokens, and
+ * {@link splitTranscriptText} turns them into a rendered element rather than leaving
+ * angle brackets in the middle of a sentence.
  */
-function describeBlob(blob: string): string {
-  try {
-    const value: unknown = JSON.parse(blob);
-    if (Array.isArray(value)) {
-      return `⟨context · ${value.length} item${value.length === 1 ? "" : "s"}⟩`;
+function describeBlob(_blob: string): string {
+  return CONTEXT_DONE;
+}
+
+/** The redaction tokens. Internal sentinels — never shown raw; see splitTranscriptText. */
+const CONTEXT_DONE = "⟨context⟩";
+const CONTEXT_PARTIAL = "⟨context · partial⟩";
+const CONTEXT_STREAMING = "⟨context · still arriving…⟩";
+
+/** What each token says to a person. */
+const CONTEXT_LABEL: Record<string, string> = {
+  [CONTEXT_DONE]: "world context assembled",
+  [CONTEXT_PARTIAL]: "world context assembled — partial",
+  [CONTEXT_STREAMING]: "assembling world context…",
+};
+
+/** True for a line that is only a redaction marker. */
+function contextLabel(line: string): string | null {
+  return CONTEXT_LABEL[line.trim()] ?? null;
+}
+
+/** A rendered piece of an engine's prose: its own words, or a redacted context marker. */
+export type TranscriptPart =
+  | { kind: "prose"; text: string }
+  | { kind: "context"; label: string };
+
+/**
+ * Split cleaned prose into what the model SAID and where a blob was taken out.
+ *
+ * The parsing lives here with the rest of the text handling, so the component stays a
+ * renderer: it receives "prose" and "context" and decides only how each one looks.
+ * Markers always occupy a whole line (see appendMarker), which is what makes this a
+ * line split rather than a second parser.
+ */
+export function splitTranscriptText(text: string): TranscriptPart[] {
+  const parts: TranscriptPart[] = [];
+  let prose: string[] = [];
+  const flush = () => {
+    const joined = prose.join("\n").trim();
+    if (joined) parts.push({ kind: "prose", text: joined });
+    prose = [];
+  };
+  for (const line of text.split("\n")) {
+    const label = contextLabel(line);
+    if (label === null) {
+      prose.push(line);
+      continue;
     }
-    if (value && typeof value === "object") {
-      const keys = Object.keys(value as Record<string, unknown>);
-      if (keys.length === 0) return "⟨context⟩";
-      const shown = keys.slice(0, 5).join(", ");
-      return `⟨context · ${shown}${keys.length > 5 ? ", …" : ""}⟩`;
+    flush();
+    // Consecutive markers collapse: two redactions in a row are one fact, said twice.
+    if (parts[parts.length - 1]?.kind !== "context") {
+      parts.push({ kind: "context", label });
     }
-  } catch {
-    // near-JSON, or a fragment — fall through
   }
-  return "⟨context⟩";
+  flush();
+  return parts;
+}
+
+/** The prose alone — markers dropped. What the one-line peek should read from. */
+export function proseOnly(text: string): string {
+  return splitTranscriptText(text)
+    .filter((p): p is Extract<TranscriptPart, { kind: "prose" }> => p.kind === "prose")
+    .map((p) => p.text)
+    .join("\n");
 }
 
 /**

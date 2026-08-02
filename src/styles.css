@@ -111,6 +111,49 @@
   box-sizing: border-box;
 }
 
+/* --- the scrollbar (v8.1) ------------------------------------------------
+   The default Chromium bar is a 15px grey channel with a boxy thumb and a
+   ruled track — on a screen whose entire design is quiet white cards it was
+   the loudest element on it, and it sits directly beside the plan.
+
+   So: no track at all, a thin capsule thumb held off the edge by a
+   transparent border (background-clip: content-box is what makes that border
+   read as padding rather than as more thumb), and colour that only arrives on
+   hover. Declared universally rather than per-scroller — `.column`, the focus
+   stream and the day list are all the same kind of surface, and a second
+   scroller styled differently from the first is worse than neither.
+   ------------------------------------------------------------------------ */
+
+*::-webkit-scrollbar { width: 11px; height: 11px; }
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  background-color: rgba(26, 31, 51, 0.16);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+/* The container is what the pointer is over, not the thumb — so the reveal has
+   to hang off the scroller, or the bar stays invisible until you find it. */
+*:hover::-webkit-scrollbar-thumb { background-color: rgba(26, 31, 51, 0.28); }
+*::-webkit-scrollbar-thumb:hover { background-color: rgba(26, 31, 51, 0.42); }
+*::-webkit-scrollbar-thumb:active { background-color: var(--accent); }
+
+/* FIREFOX ONLY, and the guard is load-bearing. From Chrome 121 the standard
+   `scrollbar-width` property TURNS OFF `::-webkit-scrollbar` entirely — declaring both
+   does not layer them, it silently discards everything above and leaves the plain
+   native thin bar. `not selector(::-webkit-scrollbar)` is false in Chromium and WebKit
+   (they know the selector) and true in Firefox (it does not), so each engine gets the
+   one it can actually render: the capsule here, the native thin bar there. The Family
+   Hub's webview is Chromium, so the shipped surface is the capsule. */
+@supports (scrollbar-width: thin) and (not selector(::-webkit-scrollbar)) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(26, 31, 51, 0.28) transparent;
+  }
+}
+
 body {
   margin: 0;
   background: radial-gradient(1200px 700px at 70% -10%, #f6f8fd 0%, var(--bg) 60%);
@@ -787,7 +830,18 @@ summary:focus-visible {
    It also has to carry a wait that is sometimes a second (Act 1) and sometimes a minute
    (Act 3, while another goal re-plans), so it must be able to hold the eye. */
 .saving {
-  position: absolute;
+  /* FIXED, not absolute (v8.1). It was absolute against `.app` — which is fine
+     while `.app` is exactly one viewport tall, and `.app` is not: below 720px of
+     height or width the shell drops to `height: auto` and the page scrolls
+     (see the media query at the top of this file). Approving is the LAST thing
+     on that page, so the user is scrolled to the bottom when the takeover
+     mounts — and a takeover that spans a 2000px-tall `.app` centres its spinner
+     and its text somewhere near the middle, a screen and a half above where
+     anyone is looking. What arrived under the finger was a flat `--bg` wash
+     with nothing in it: the blank page reported after "Approve & Save".
+     Pinned to the viewport it is on screen wherever the reader is, which is
+     what a full-surface takeover meant in the first place. */
+  position: fixed;
   inset: 0;
   z-index: 30;
   display: flex;

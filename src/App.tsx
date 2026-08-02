@@ -252,8 +252,15 @@ type UiAction =
  * webview, so in Act 3 this screen is up for exactly as long as that takes and the floor
  * never binds. It binds in Act 1, where saving really is instant and a flash of a screen
  * nobody can read is worse than no screen at all.
+ *
+ * v8.1: 1400 → 2200. The cloud's own floor is 1.6 s (SAVE_DWELL_S), so at 1400 this one
+ * never bound and the screen was up for whatever the cloud allowed. With the run itself
+ * now ~11 s rather than ~225 s, a second and a half of hand-off is the fastest thing on
+ * screen all demo — it registers as a flicker between the plan and the empty webview
+ * rather than as a transition. This is the only floor either side has that is longer
+ * than the cloud's, so it is the one that decides.
  */
-const MIN_SAVING_MS = 1400;
+const MIN_SAVING_MS = 2200;
 
 const MAX_TICKS = 40;
 
@@ -920,13 +927,32 @@ function reducer(state: UiState, action: UiAction): UiState {
       // proposal on the initial plan. Pending approvals count because the user
       // has acted on the plan CTA; later status frames only confirm execution.
       const approved = isPlanApproved(state.plan, proposalStatuses);
+      // v8.1 — COMMITTED, not UNANIMOUS. The saving screen used to hang off `approved`,
+      // which is true only when every approval-required proposal was said YES to. But a
+      // firm proposal is an OPT-IN (ProposalList: "+ Include"), so leaving one out is the
+      // DEFAULT path, not an edge case — and on that path `approved` stayed false, no
+      // saving screen mounted, no hand-off banner either, and the cloud's close a second
+      // and a half later wiped the surface to an empty column. That is the blank screen
+      // after "Approve & Save": declining an optional grocery order silently cost the
+      // user every bit of feedback that the goal had been saved at all.
+      //
+      // What actually starts the hand-off is the decision set being COMPLETE — that is
+      // the moment `sendDecisions` puts the single approval frame on the wire, whatever
+      // the individual answers were. A declined proposal is a decision; the goal still
+      // saves.
+      const required = (state.plan?.payload.proposals ?? []).filter(
+        (proposal) => proposal.tier !== "auto" && proposal.requires_approval,
+      );
+      const committed =
+        required.length > 0 &&
+        required.every((proposal) => proposalStatuses[proposal.proposal_id] !== undefined);
       return {
         ...state,
         proposalStatuses,
         approved,
         // v7: hold the surface. Everything the device reports about what actually ran
         // arrives AFTER this tap, and used to land on a UI the close had already wiped.
-        saving: approved ? { startedAt: Date.now(), detail: null } : state.saving,
+        saving: committed ? { startedAt: Date.now(), detail: null } : state.saving,
       };
     }
 
@@ -1036,12 +1062,22 @@ export default function App() {
   // v5.1 plan reveal pacing — the outcome column fills one row at a time, for the same
   // reason the harness has a render floor: the device emits every plan_progress in a
   // single loop, so unpaced the whole plan appears in one frame.
+  //
+  // v8.1: AND IT WAITS ITS TURN. `plan_progress` fires after the safety and approval
+  // beats are SENT, but those beats are still queued behind the render floor — so with
+  // v8's latency the rows (and behind them "Plan ready") landed while Safety, Task
+  // Manager and Approval were still being played out above. Two things claiming to be
+  // the front of the run at once, and the one that had finished was the one still
+  // moving. The harness is the narrator; the plan is what it arrives at. Nothing is
+  // dropped or reordered — the queue simply does not start draining until the pipeline
+  // has said its last word.
   useEffect(() => {
     if (state.draftQueue.length === 0) return;
+    if (state.harness.queue.length > 0 || !state.harness.settled) return;
     const wait = Math.max(0, state.draftHoldUntil - Date.now());
     const timer = setTimeout(() => dispatch({ type: "draft_tick" }), wait);
     return () => clearTimeout(timer);
-  }, [state.draftQueue, state.draftHoldUntil]);
+  }, [state.draftQueue, state.draftHoldUntil, state.harness.queue, state.harness.settled]);
 
   // The run clock shown in the goal bar: starts with the goal, freezes when the work
   // stops (so it reports how long the run took, not how long the tab has been open).
@@ -1253,8 +1289,14 @@ export default function App() {
   // Rows are still landing, or they have landed but the plan itself has not.
   const formingPlan =
     state.draftQueue.length > 0 || (state.plan === null && state.draftItems.length > 0);
+  // v8.1: and it does not appear AT ALL until the pipeline has finished. The reveal
+  // pacing above keeps the rows queued, but `plan` itself arrives whole — without this
+  // the finished "Plan ready" card mounted underneath a harness that was still lighting
+  // up its last three engines. The plan is the end of the run, so it waits for the end
+  // of the run.
   const showOutcome =
     !state.understanding &&
+    !harnessDraining &&
     (state.plan !== null || state.draftItems.length > 0 || state.draftQueue.length > 0);
   // Hand the screen to the plan once the run has nothing left to say.
   const runCompact = state.plan !== null && !harnessDraining && !formingPlan;
