@@ -407,6 +407,28 @@
    lines that push later blocks out of the scroller. */
 .focus__said { margin: 0; white-space: pre-wrap; }
 
+/* A REDACTION, and it should read as one — not as something the model said.
+   Where a JSON blob was taken out of the narration (see stripJsonBlobs). Quieter than
+   the prose it sits between and set on its own line, so the eye passes over it: it is
+   bookkeeping about the transcript, not a thought. Sized and coloured off the same pair
+   as .focus__step-detail, so the drawer keeps one voice for its asides. */
+.focus__ctx {
+  margin: 0.4rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--ink-faint);
+}
+.focus__ctx-mark {
+  flex: 0 0 auto;
+  font-style: normal;
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  opacity: 0.75;
+}
+
 /* v7 steps — what the engine DID, under whatever it said it was doing. Deliberately
    more legible than the prose above: the prose is the model's voice and may not arrive
    at all, and these are the record that does. The gap is now on TOP (they follow the

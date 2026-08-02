@@ -42,6 +42,8 @@ import {
   buildTranscript,
   buildTranscriptBlocks,
   lastSentence,
+  proseOnly,
+  splitTranscriptText,
 } from "../lib/reasoning";
 
 /** `monitor_adapt` is a BOARD engine — it never fires during goal creation. */
@@ -68,7 +70,9 @@ export interface WorkingColumnProps {
  * to the last CLAUSE, and let the CSS ellipsis take it from there.
  */
 function peek(text: string): string {
-  const tail = lastSentence(text).trim();
+  // Markers never reach the one-liner: the collapsed card has room for one line, and
+  // "⟨context⟩" spends it saying that something was hidden.
+  const tail = lastSentence(proseOnly(text)).trim();
   if (tail.length <= 110) return tail;
   return tail.split(/\s*(?:→|;|\|)\s*/).filter(Boolean).pop() ?? tail;
 }
@@ -341,14 +345,32 @@ export function WorkingColumn({
                         sentence that announces it reads backwards, and worse, it put the
                         steps of one engine directly under the previous engine's prose.
                         The caret still trails the prose, because that is what streams. */}
-                    {block.text ? (
-                      <p className="focus__said">
-                        {block.text}
-                        {working && index === blocks.length - 1 && block.engine === active ? (
-                          <span className="focus__caret" aria-hidden />
-                        ) : null}
-                      </p>
-                    ) : null}
+                    {/* Prose and REDACTIONS are different things and now look it. A blob
+                        the model dumped mid-sentence used to be replaced by an
+                        angle-bracket marker left inline in the paragraph, listing the
+                        object's own field names — schema, in the middle of a sentence.
+                        The fact worth keeping is that context was gathered; it gets a
+                        row of its own and says so in words. */}
+                    {splitTranscriptText(block.text).map((part, partIndex, parts) =>
+                      part.kind === "context" ? (
+                        <p key={`ctx-${partIndex}`} className="focus__ctx">
+                          <i className="focus__ctx-mark" aria-hidden>
+                            ▤
+                          </i>
+                          {part.label}
+                        </p>
+                      ) : (
+                        <p key={`prose-${partIndex}`} className="focus__said">
+                          {part.text}
+                          {working &&
+                          index === blocks.length - 1 &&
+                          partIndex === parts.length - 1 &&
+                          block.engine === active ? (
+                            <span className="focus__caret" aria-hidden />
+                          ) : null}
+                        </p>
+                      ),
+                    )}
                     {block.steps.length > 0 ? (
                       <ol className="focus__steps">
                         {block.steps.map((s) => (
