@@ -1077,6 +1077,16 @@ export default function App() {
 
   // The run clock shown in the goal bar: starts with the goal, freezes when the work
   // stops (so it reports how long the run took, not how long the tab has been open).
+  /*
+   * v9 §8.4 — "Close now" is a HANDOFF, not a task.
+   *
+   * The surface ends under the finger: dispatching close_now unmounts this card. So
+   * there is no spinner and no "closing…" state to show — the only honest feedback for
+   * a close button is the closing. What this flag does buy is one detail: the countdown
+   * ring FREEZES on pointer-down, because a ring that keeps draining while the close is
+   * already underway is promising seconds that no longer exist.
+   */
+  const [closingRefusal, setClosingRefusal] = useState(false);
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [runEndedAt, setRunEndedAt] = useState<number | null>(null);
   useEffect(() => {
@@ -1341,7 +1351,10 @@ export default function App() {
                 seconds later, and asking someone to acknowledge a "no" would be the
                 interface inventing work. */}
             {state.declined ? (
-              <article className="declined" aria-label="Not something this home can do">
+              <article
+                className={closingRefusal ? "declined declined--closing" : "declined"}
+                aria-label="Not something this home can do"
+              >
                 <header className="declined__head">
                   <span className="declined__mark">
                     <Icon name="ban" size={22} />
@@ -1368,6 +1381,7 @@ export default function App() {
                   <button
                     type="button"
                     className="btn btn--quiet declined__close"
+                    onPointerDown={() => setClosingRefusal(true)}
                     onClick={() => dispatch({ type: "close_now" })}
                   >
                     Close now

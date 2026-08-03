@@ -175,6 +175,11 @@
   animation-fill-mode: forwards;
   animation-iteration-count: 1;
 }
+/* §8.4: the moment the close is committed, the ring stops claiming time it no longer
+   has. Pausing rather than resetting, so it holds exactly where the user last saw it. */
+.declined--closing .countdown__sweep { animation-play-state: paused; }
+.declined--closing .countdown__label { opacity: 0.5; }
+
 @keyframes countdown-drain {
   to { stroke-dashoffset: var(--c); }
 }
