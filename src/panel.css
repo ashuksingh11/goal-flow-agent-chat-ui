@@ -375,12 +375,6 @@
   line-height: 1.2;
   color: var(--ink);
 }
-.focus__elapsed {
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--ink-faint);
-  font-variant-numeric: tabular-nums;
-}
 .focus__spinner {
   flex: 0 0 auto;
   width: 26px;
@@ -415,26 +409,34 @@
   background: var(--accent);
   flex: 0 0 auto;
 }
-.focus__track { height: 4px; border-radius: 2px; background: var(--surface-2); overflow: hidden; }
-.focus__fill {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-  background: var(--accent);
-  /* Advances only on a real engine clear — no fake crawl between beats. */
-  transition: width 400ms var(--p-ease-out);
-}
-.focus__details { font-size: 0.9rem; }
+/* .focus__track / .focus__fill deleted in v9 — see WorkingColumn for why an
+   indeterminate run must not be given a determinate bar. */
+
+.focus__details { font-size: var(--fs-sub); }
+/* A CONTROL, not a text link. This is the only thing the panel invites you to touch
+   while the run is going, and it was a 0.9rem line of accent text with a `⌄` glyph
+   pasted on by `content:` — about 20px of target on a screen you reach for standing up.
+   The motion spec asks for >=60px with hit padding; this is 56 plus the row's own gap.
+   The chevron is a real Icon now, so it can rotate rather than be swapped for `⌃`
+   (U+2303, which is the Mac control-key symbol, not a chevron). */
 .focus__summary {
   cursor: pointer;
   list-style: none;
-  color: var(--accent);
-  font-weight: 500;
-  padding: 0.15rem 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 56px;
+  border-radius: 18px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1.5px var(--stroke-strong);
+  color: var(--ink-dim);
+  font-size: var(--fs-sub);
+  font-weight: 600;
+  transition: transform var(--p-press) var(--p-ease-out);
 }
+.focus__summary:active { transform: scale(0.97); }
 .focus__summary::-webkit-details-marker { display: none; }
-.focus__summary::before { content: "⌄ "; }
-.focus__details[open] .focus__summary::before { content: "⌃ "; }
 .focus__drawer {
   margin-top: 0.7rem;
   display: flex;
@@ -640,14 +642,19 @@
 
 /* collapsed, once the plan is the hero */
 .pipe-collapsed { border-radius: 18px; background: rgba(255, 255, 255, 0.72); box-shadow: inset 0 0 0 1px var(--stroke-soft, var(--stroke)); }
+/* The whole bar is the expand control — on stage this is what gets tapped to show the
+   engine rail, so it is a 56px row, not a chevron you have to hit. */
 .pipe-collapsed__bar {
   list-style: none;
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.85rem 1.1rem;
+  min-height: 56px;
+  padding: 0.5rem 1.1rem;
+  transition: transform var(--p-press) var(--p-ease-out);
 }
+.pipe-collapsed__bar:active { transform: scale(0.99); }
 .pipe-collapsed__bar::-webkit-details-marker { display: none; }
 .pipe-collapsed__mark {
   width: 22px;
@@ -661,9 +668,16 @@
   font-weight: 700;
   font-style: normal;
 }
-.pipe-collapsed__label { flex: 1; font-size: 0.95rem; font-weight: 500; color: var(--ink-dim); }
-.pipe-collapsed__chevron::before { content: "⌄"; color: var(--ink-faint); }
-.pipe-collapsed[open] .pipe-collapsed__chevron::before { content: "⌃"; }
+.pipe-collapsed__label { flex: 1; font-size: var(--fs-sub); font-weight: 500; color: var(--ink-dim); }
+/* The chevron TURNS rather than being swapped for a different character. Two glyphs
+   cannot be tweened; one element can, and the rotation is the affordance telling you
+   which way the drawer is about to go. Mirrored on close, per the motion spec. */
+.pipe-collapsed__chevron {
+  flex: 0 0 auto;
+  color: var(--ink-quiet);
+  transition: transform var(--p-dur) var(--p-ease-in-out);
+}
+.pipe-collapsed[open] .pipe-collapsed__chevron { transform: rotate(180deg); }
 .pipe--inset { padding: 0 1.1rem 0.6rem; }
 
 /* --------------------------- the forming plan ---------------------------- */

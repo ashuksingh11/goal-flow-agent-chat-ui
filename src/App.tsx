@@ -22,7 +22,7 @@
  *
  * Component tree:
  *   App
- *   ├── GoalBar           — the goal, the run clock, engines-cleared hairline
+*   ├── GoalBar           — the goal; the run total, once the run has ended
  *   ├── column
  *   │   ├── WorkingColumn — receipts / focus card (transcript + calls) / ghosts
  *   │   ├── PlanColumn    — the plan forming, then PlanCard + ProposalList
@@ -59,7 +59,6 @@ import type {
   UiOutboundMessage,
 } from "./types/contract";
 import {
-  HARNESS_PIPELINE,
   INITIAL_DEMO_CLOCK,
   INITIAL_HARNESS,
   PLAN_ITEM_STEP_MS,
@@ -1262,12 +1261,11 @@ export default function App() {
   const harnessDraining = state.harness.queue.length > 0 || !state.harness.settled;
   const goalText =
     [...state.transcript].reverse().find((entry) => entry.kind === "goal")?.text ?? state.goalText;
-  const enginesCleared = HARNESS_PIPELINE.filter((e) => {
-    if (e.id === "monitor_adapt") return false;
-    const s = state.harness.engines[e.id].status;
-    return s === "done" || s === "blocked";
-  }).length;
-  const engineTotal = HARNESS_PIPELINE.length - 1; // monitor_adapt is a board engine
+  // v9: enginesCleared/engineTotal used to be computed here purely to feed GoalBar's
+  // hairline. That hairline is gone (it was a third rendering of a count the rail shows
+  // and the pipeline head states in words), and WorkingColumn derives the same numbers
+  // itself from the same harness state — so this was a duplicate derivation as well as a
+  // duplicate display.
 
   const showRun =
     !state.understanding && (harnessStarted(state.harness) || state.working || harnessDraining);
@@ -1301,8 +1299,6 @@ export default function App() {
         fallback={state.plan ? "Your plan" : "Waiting for a goal…"}
         startedAt={runStartedAt}
         endedAt={runEndedAt}
-        cleared={enginesCleared}
-        total={engineTotal}
         deviceLabel={pairedDevice?.device_name ?? state.boundDeviceId}
         deviceCount={state.deviceChoices?.length ?? 0}
         connection={connection}

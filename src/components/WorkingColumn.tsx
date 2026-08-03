@@ -35,6 +35,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { HARNESS_PIPELINE, formatEngineMs } from "../types/ui";
 import type { AgentStreamEntry, HarnessState } from "../types/ui";
+import { Icon } from "./Icon";
 import {
   INTERPRETING_MESSAGES,
   PLANNING_MESSAGES,
@@ -154,34 +155,24 @@ export function WorkingColumn({
     return () => window.clearInterval(id);
   }, [rotating]);
 
-  /**
-   * Run elapsed, off the earliest beat ARRIVAL (types/ui.ts stamps it on the wire, not at
-   * paint) — so this is the device's real elapsed, not our render floor. It is the run's
-   * clock, not the engine's: it matches the "composed in Ns" the plan reports afterwards.
-   */
-  const runStartedAt = useMemo(() => {
-    const stamps = ENGINES.map((e) => harness.engines[e.id].startedAt).filter(
-      (t): t is number => typeof t === "number",
-    );
-    return stamps.length > 0 ? Math.min(...stamps) : null;
-  }, [harness.engines]);
-  /**
-   * ELAPSED SECONDS, and it only re-renders when the SECOND changes.
+  /*
+   * v9 — THE LIVE ELAPSED CLOCK IS GONE, and with it the 100ms interval that drove it.
    *
-   * The interval still ticks at 100ms so the display never lags a boundary by more than
-   * that — but it now stores the whole second, so nine ticks in ten are a no-op instead
-   * of re-rendering the card. The card contains the transcript, and during grounding that
-   * transcript is being rebuilt by streaming chunks at the same time; ten renders a second
-   * on top of that is most of what "animating a lot" was.
+   * It used to tick beside the spinner. That made five simultaneous representations of
+   * one fact on this screen — spinner, this clock, the focus card's progress bar, the
+   * "N of 7 engines cleared" count, and the rail's own per-row state — which is exactly
+   * what the motion spec's choreography forbids: only one live region at a time.
+   *
+   * The spinner is the one that survives, because it is the only one telling the truth.
+   * The run has no honest percent and no honest ETA — it is an LLM call of unknown
+   * length — so a spinner is the whole of what can be said. The count stays as a quiet
+   * discrete supporting signal in the pipeline head; it steps on real beats.
+   *
+   * The number is not lost: the run's total appears once, settled, on the plan card
+   * ("composed in 10.6s"), which is where a duration is information rather than pressure.
+   * Deleting the interval also stops re-rendering a card that holds a transcript being
+   * rebuilt by streaming chunks at the same time.
    */
-  const [elapsed, setElapsed] = useState(0);
-  useEffect(() => {
-    if (runStartedAt === null || !showFocus) return;
-    const read = () => setElapsed(Math.round((Date.now() - runStartedAt) / 1000));
-    read();
-    const id = window.setInterval(read, 100);
-    return () => window.clearInterval(id);
-  }, [runStartedAt, showFocus]);
 
   /**
    * The transcript follows its own tail — WITHOUT animating, and only if the reader is
@@ -272,13 +263,13 @@ export function WorkingColumn({
       <section className="run run--compact" aria-label="Harness run">
         <details className="pipe-collapsed">
           <summary className="pipe-collapsed__bar">
-            <i className="pipe-collapsed__mark" aria-hidden>
-              ✓
+            <i className="pipe-collapsed__mark">
+              <Icon name="check" size={14} strokeWidth={2.25} />
             </i>
             <span className="pipe-collapsed__label">
               Pipeline · all {cleared} engines cleared
             </span>
-            <span className="pipe-collapsed__chevron" aria-hidden />
+            <Icon name="chevron-down" size={18} className="pipe-collapsed__chevron" />
           </summary>
           <div className="pipe pipe--inset">{pipeline}</div>
         </details>
@@ -295,9 +286,6 @@ export function WorkingColumn({
             <h2 className="focus__title">
               {interpreting ? "Reading your goal…" : working ? "Composing your plan…" : "Wrapping up…"}
             </h2>
-            {runStartedAt !== null ? (
-              <span className="focus__elapsed">{elapsed}s</span>
-            ) : null}
           </header>
 
           {activeMeta ? (
@@ -314,24 +302,25 @@ export function WorkingColumn({
             </p>
           ) : null}
 
-          <div
-            className="focus__track"
-            role="progressbar"
-            aria-valuemin={0}
-            aria-valuemax={ENGINES.length}
-            aria-valuenow={cleared}
-          >
-            <span
-              className="focus__fill"
-              style={{ width: `${(cleared / ENGINES.length) * 100}%` }}
-            />
-          </div>
+          {/* v9 — THE PROGRESS BAR IS GONE. A determinate bar promises that the remaining
+              distance is known, and here it is not: the width was engines-cleared, which
+              steps in sevenths and says nothing about how long the engine currently
+              running will take. The design file's version had drifted further still,
+              sitting at 63% beside a label reading "3 of 7 engines cleared" (43%).
+              An indeterminate process gets an indeterminate indicator — the spinner —
+              and the truthful discrete fact keeps its own words in the pipeline head. */}
 
           <details
             className="focus__details"
             onToggle={(e) => setDetailsOpen((e.currentTarget as HTMLDetailsElement).open)}
           >
-            <summary className="focus__summary">Show details</summary>
+            {/* A real control, not a text link. The motion spec asks for a >=60px target
+                with hit padding, and this is the one thing on the screen the user is
+                invited to touch while the run is going. */}
+            <summary className="focus__summary">
+              <Icon name={detailsOpen ? "chevron-up" : "chevron-down"} size={18} />
+              {detailsOpen ? "Hide details" : "Show details"}
+            </summary>
             <div className="focus__drawer">
               <div className="focus__transcript" ref={bodyRef} aria-label="Reasoning">
                 {blocks.map((block, index) => (
