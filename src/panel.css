@@ -50,22 +50,22 @@
 /* ------------------------------ primitives ------------------------------ */
 
 .panel-eyebrow {
-  font-size: 0.66rem;
+  font-size: var(--fs-micro);
   font-weight: 600;
-  letter-spacing: 0.15em;
+  letter-spacing: var(--ls-micro);
   text-transform: uppercase;
-  color: var(--ink-faint);
+  color: var(--ink-quiet);
 }
-.panel-meta { font-size: 0.8rem; font-weight: 500; color: var(--ink-faint); }
+.panel-meta { font-size: var(--fs-meta); font-weight: 500; color: var(--ink-quiet); }
 
 .btn {
   border: none;
   border-radius: 18px;
   padding: 0 1.25rem;
   min-height: 56px;
-  font-size: 1.05rem;
+  font-size: var(--fs-body);
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: var(--ls-tight);
   cursor: pointer;
   /* Feedback fires on press, and only transform moves. */
   transition: transform var(--p-press) var(--p-ease-out), background var(--p-press) linear;
@@ -83,8 +83,19 @@
   .approval__switch:hover { background: #fff; }
   .approval--on .approval__switch:hover { background: var(--accent); }
 }
-.btn--primary { background: var(--accent); color: #fff; box-shadow: 0 6px 18px -4px rgba(63, 111, 232, 0.36); }
-.btn--quiet { background: transparent; color: var(--ink-dim); box-shadow: inset 0 0 0 1.5px var(--stroke); flex: 0 0 auto; }
+/* v9: one shadow language. The accent glow under the primary was a second, coloured
+   elevation living beside the neutral card shadow; a full-width solid-accent 56px button
+   is not short of presence. */
+.btn--primary { background: var(--accent); color: #fff; }
+/* v9: a secondary you can see. This was `transparent` with a 1.5px --stroke border —
+   1.23:1 against the card, which is invisible, and paired with dim label text it read as
+   DISABLED on the one screen where declining has to stay expressible. WCAG 1.4.11 wants
+   3:1 for a control boundary. Secondary now means lighter weight, not absent. */
+.btn--quiet {
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  box-shadow: inset 0 0 0 1.5px var(--stroke-strong);
+}
 .btn--commit { width: 100%; margin-top: 0.35rem; }
 .btn--include,
 .btn--included {
@@ -146,30 +157,39 @@
 .confirm-card__head { display: flex; flex-direction: column; gap: 0.35rem; }
 .confirm-card__title {
   margin: 0;
-  font-size: clamp(1.45rem, 3.6vw, 1.85rem);
+  font-size: var(--fs-display);
   font-weight: 700;
   line-height: 1.15;
-  letter-spacing: -0.025em;   /* large text wants negative tracking */
+  letter-spacing: var(--ls-display);   /* large text wants negative tracking */
   color: var(--ink);
 }
 .confirm-card__thought {
   margin: 0;
-  font-size: 1.03rem;
+  font-size: var(--fs-lead);
   line-height: 1.55;
   color: var(--ink-dim);
 }
 .confirm-card__resolved { margin: 0; font-weight: 600; color: var(--good); }
+/* Equal halves. Decline used to be a fixed-width block beside a flexible Confirm, which
+   made its width an arbitrary number rather than a decision; the pair is symmetrical and
+   the hierarchy comes from fill-vs-outline, which is where it belongs. */
 .confirm-card__actions { display: flex; gap: 0.75rem; }
-.confirm-card__actions .btn--primary { flex: 1; }
+.confirm-card__actions .btn { flex: 1; }
 
 .constraints { display: flex; flex-direction: column; gap: 0.75rem; }
 .constraints__head { display: flex; align-items: center; justify-content: space-between; }
-.constraints__grid {
+
+/* v9: one column. The old grid was `repeat(auto-fit, minmax(230px, 1fr))`, which on the
+   760px panel resolves to two columns — so THREE constraints rendered as two chips and a
+   half-width orphan beside dead space. Constraint counts come from data and are odd as
+   often as they are even, and a rule the plan can be blocked on is not a thing to lay out
+   on the assumption it comes in pairs. */
+.constraints__list {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 0.75rem;
 }
 
@@ -191,22 +211,25 @@
   background: rgba(255, 255, 255, 0.85);
   display: grid;
   place-items: center;
-  font-size: 1.15rem;
 }
-.constraint__body { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.constraint__body { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; flex: 1; }
 .constraint__label {
-  font-size: 0.63rem;
+  font-size: var(--fs-micro);
   font-weight: 600;
-  letter-spacing: 0.13em;
-  color: var(--ink-faint);
+  letter-spacing: var(--ls-micro);
+  color: var(--ink-quiet);
 }
 .constraint__value {
-  font-size: 1.05rem;
+  font-size: var(--fs-lead);
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: var(--ls-tight);
   color: var(--ink-dim);
   overflow-wrap: anywhere;
 }
+/* The lock is what makes "enforced" readable at a glance. The old chip said so in a
+   0.7rem caption at 2.74:1, which on a fridge door is the same as not saying it. It
+   takes the family's tone, so it reads as part of the same statement. */
+.constraint__mark { flex: 0 0 auto; opacity: 0.75; }
 /* v6 provenance, finally rendered (it has been on the wire since v6 and drawn
    nowhere). Quiet by construction: the value is what the user reads, this only has
    to be legible when they ask "says who?". */
@@ -217,48 +240,76 @@
   color: var(--ink-faint);
   overflow-wrap: anywhere;
 }
+/* The tone colours the value, the family icon and the lock together, so a chip reads as
+   one statement rather than a tinted box with unrelated marks in it. This is the payoff
+   of dropping emoji: an emoji cannot take the family's colour, an icon inherits it. */
+.constraint__icon { color: var(--ink-dim); }
 .constraint--warn { background: var(--warn-soft); }
-.constraint--warn .constraint__value { color: var(--warn); }
+.constraint--warn .constraint__value,
+.constraint--warn .constraint__icon,
+.constraint--warn .constraint__mark { color: var(--warn); }
 .constraint--good { background: var(--good-soft); }
-.constraint--good .constraint__value { color: var(--good); }
+.constraint--good .constraint__value,
+.constraint--good .constraint__icon,
+.constraint--good .constraint__mark { color: var(--good); }
 .constraint--violet { background: var(--violet-soft); }
-.constraint--violet .constraint__value { color: var(--violet); }
+.constraint--violet .constraint__value,
+.constraint--violet .constraint__icon,
+.constraint--violet .constraint__mark { color: var(--violet); }
 .constraint--accent { background: var(--accent-soft); }
-.constraint--accent .constraint__value { color: var(--accent); }
+.constraint--accent .constraint__value,
+.constraint--accent .constraint__icon,
+.constraint--accent .constraint__mark { color: var(--accent); }
+.constraint--plain .constraint__mark { color: var(--ink-dim); }
 
-/* --- preferences (v7): the soft half -------------------------------------
-   OUTLINED, never tinted. The constraint chips above are filled because a fill
-   says "this one can stop your plan"; a preference cannot, and giving it the same
-   surface would spend the reader's attention on the thing that matters less. Same
-   reason there is no icon tile: the chips earn one by being safety data. */
+/* --- preferences (v7, reshaped in v9): the soft half ----------------------
+   NOT A BOX. Until v9 this was an outlined chip on the same 18px radius, the same
+   padding and the same icon-then-two-lines anatomy as a constraint — one object in
+   two skins, distinguished only by fill-vs-outline. But the whole reason this
+   section exists is to say that a constraint can stop your plan and a preference
+   cannot, and that difference has to survive being glanced at from across a
+   kitchen. So a constraint is a tinted box with a disc and a lock, and a
+   preference is a bare row: no container, no tint, source pushed to the far edge
+   where it stays available without competing. Density IS the demotion. */
 
 .prefs { display: flex; flex-direction: column; gap: 0.6rem; }
-.prefs__note { margin: 0; font-size: 0.8rem; line-height: 1.4; color: var(--ink-faint); }
+.prefs__note { margin: 0; font-size: var(--fs-meta); line-height: 1.4; color: var(--ink-quiet); }
 .prefs__list {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 .pref {
   display: flex;
   align-items: center;
-  padding: 0.7rem 1rem;
-  border-radius: 18px;
-  background: transparent;
-  box-shadow: inset 0 0 0 1.5px var(--stroke);
+  gap: 0.75rem;
+  padding: 0.4rem 0.15rem;
+  min-width: 0;
 }
-.pref__body { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.pref__icon { flex: 0 0 auto; color: var(--ink-dim); }
 .pref__label {
-  font-size: 0.95rem;
-  font-weight: 600;
-  letter-spacing: -0.005em;
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sub);
+  font-weight: 500;
+  letter-spacing: 0;
   color: var(--ink-dim);
   overflow-wrap: anywhere;
 }
-.pref__source { font-size: 0.7rem; font-weight: 500; line-height: 1.25; color: var(--ink-faint); }
+/* Right-aligned and quiet: provenance answers "says who?" when asked, and the
+   answer genuinely differs per row (Account · taste vs Derived · fridge contents),
+   so it earns its place — just not in the reading path. */
+.pref__source {
+  flex: 0 0 auto;
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--ink-quiet);
+  text-align: right;
+}
 
 /* --- capture (v6-M4): rules the user stated, offered for confirmation ------
    Visually SEPARATE from the constraint chips above. Those are settled policy the
