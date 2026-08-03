@@ -39,6 +39,7 @@ export type IconName =
   | "mic"
   | "refresh-cw"
   | "clock"
+  | "lightbulb"
   // constraint families (see CONSTRAINT_FAMILIES in UnderstandingCard)
   | "ban"
   | "leaf"
@@ -78,6 +79,11 @@ const PATHS: Record<IconName, string[]> = {
   ],
   "refresh-cw": ["M20 12a8 8 0 1 1-2.3-5.6", "M20 4v5h-5"],
   clock: ["M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z", "M12 7.5V12l3 1.8"],
+  lightbulb: [
+    "M9 18h6",
+    "M10 21h4",
+    "M12 3a6 6 0 0 0-3.6 10.8c.5.4.8 1 .8 1.7V17h5.6v-1.5c0-.7.3-1.3.8-1.7A6 6 0 0 0 12 3z",
+  ],
 
   ban: ["M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z", "m5.6 5.6 12.8 12.8"],
   leaf: ["M4.5 19.5C4.5 11 10.5 5 20 5c0 9.5-6 15-15.5 14.5z", "M9 15c1.8-3 4-5.2 7-6.5"],

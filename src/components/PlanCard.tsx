@@ -214,13 +214,13 @@ export function PlanCard({
                     </span>
                   ) : item.why.length > 0 ? (
                     <span className="day__why">
-                      <span aria-hidden>↳ </span>
+                      <Icon name="corner-down-right" size={14} className="day__why-mark" />
                       {item.why[0]}
                     </span>
                   ) : null}
                 </span>
                 {isChanged ? <span className="day__updated">Updated</span> : null}
-                <i className="day__chevron" aria-hidden />
+                <Icon name="chevron-down" size={16} className="day__chevron" />
               </button>
 
               {/* Stays mounted: the collapse animates the grid row track, so opening and
@@ -234,6 +234,7 @@ export function PlanCard({
                           supporting detail and stays here. */}
                       {item.why.slice(1, 3).map((reason) => (
                         <span key={reason} className="tag tag--why">
+                          <Icon name="corner-down-right" size={12} strokeWidth={2} />
                           {reason}
                         </span>
                       ))}
@@ -257,7 +258,7 @@ export function PlanCard({
       {payload.considered || (payload.rejected && payload.rejected.length > 0) ? (
         <section className="weighed" aria-label="What it considered">
           <p className="weighed__head">
-            <span aria-hidden>🧠 </span>
+            <Icon name="lightbulb" size={15} className="weighed__mark" />
             {payload.considered ? `${payload.considered} options considered` : "Options considered"}
             {payload.rejected && payload.rejected.length > 0
               ? ` · ${payload.rejected.length} rejected`

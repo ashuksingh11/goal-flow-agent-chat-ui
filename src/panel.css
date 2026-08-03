@@ -877,8 +877,9 @@
   margin-right: 0.35rem;
 }
 .day__updated { font-size: 0.7rem; font-weight: 600; color: var(--accent); background: var(--accent-soft); padding: 0.2rem 0.5rem; border-radius: 8px; }
-.day__chevron { color: var(--ink-faint); font-style: normal; transition: transform var(--p-dur) var(--p-ease-in-out); }
-.day__chevron::before { content: "⌄"; }
+.day__why-mark { flex: 0 0 auto; margin-right: 0.25rem; vertical-align: -2px; }
+.weighed__mark { vertical-align: -2px; margin-right: 0.3rem; }
+.day__chevron { flex: 0 0 auto; color: var(--ink-quiet); transition: transform var(--p-dur) var(--p-ease-in-out); }
 .day--open .day__chevron { transform: rotate(180deg); }
 
 /* Collapse animates the row track, so the detail can stay mounted and the open/close
@@ -896,7 +897,8 @@
 .day__tags { display: flex; flex-wrap: wrap; gap: 0.45rem; padding-bottom: 0.85rem; }
 .tag { font-size: 0.76rem; font-weight: 600; padding: 0.3rem 0.6rem; border-radius: 9px; background: var(--good-soft); color: var(--good); }
 .tag--why { background: var(--accent-soft); color: var(--accent); }
-.tag--why::before { content: "▸ "; }
+/* The mark is an icon inside the chip now, so it takes the chip's accent with it. */
+.tag--why { display: inline-flex; align-items: center; gap: 0.25rem; }
 
 /* v7: the why, on the row rather than behind a disclosure. Quiet enough that the title
    still leads, loud enough that it is read without being asked for. */

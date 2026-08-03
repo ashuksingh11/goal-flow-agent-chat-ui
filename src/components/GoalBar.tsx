@@ -19,10 +19,6 @@ import type { ConnectionState } from "../lib/ws";
 
 export interface GoalBarProps {
   goal: string;
-  /** epoch-ms the run started; null = idle (clock hidden). */
-  startedAt: number | null;
-  /** epoch-ms the run stopped; null = still running. Freezes the clock at the total. */
-  endedAt: number | null;
   deviceLabel: string | null;
   /** How many devices the cloud is offering. The chip appears only when it is a CHOICE. */
   deviceCount: number;
@@ -36,16 +32,8 @@ export interface GoalBarProps {
   fallback: string;
 }
 
-/** "0:18" — minutes:seconds, tabular so the width never jitters. */
-function clock(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
-}
-
 export function GoalBar({
   goal,
-  startedAt,
-  endedAt,
   deviceLabel,
   deviceCount,
   eyebrow,
@@ -53,19 +41,6 @@ export function GoalBar({
   onChangeDevice,
   fallback,
 }: GoalBarProps) {
-  /*
-   * v9 — the clock no longer ticks, and the 1s interval that drove it is gone.
-   *
-   * A running clock is a live region, and this header sits above a focus card whose
-   * spinner is already the run's one live signal. Two of them meant the eye had two
-   * places to watch a single fact, and a clock is the worse of the pair: it counts UP,
-   * so the longer the agent works the more it reads as a stopwatch on a late train.
-   *
-   * The duration is not deleted, it is DEFERRED — once the run ends, `endedAt` is set
-   * and the total renders once, settled, which is the same number the plan card reports
-   * as "composed in 10.6s". Information when it is information, pressure never.
-   */
-  const finished = startedAt !== null && endedAt !== null;
 
   return (
     <header className="goalbar">
@@ -75,9 +50,13 @@ export function GoalBar({
           <h1 className="goalbar__goal">{goal || fallback}</h1>
         </div>
         <div className="goalbar__aside">
-          {finished ? (
-            <span className="goalbar__clock">{clock(endedAt! - startedAt!)}</span>
-          ) : null}
+          {/* v9 — NO CLOCK HERE AT ALL, in either direction.
+              It stopped ticking first, then it turned out the settled total was a
+              duplicate too: the plan card's header already reads "7 steps · 5
+              constraints honoured · 22.6s", and this printed "0:22" two hundred pixels
+              above it in a different format. Two renderings of one number is the exact
+              thing this pass has been deleting. The duration belongs next to the result
+              it describes, and it lives there. */}
           {/* One device is not a choice — the chip would be a dev machine's hostname
               sitting on the family's screen, wired to a picker with one entry. It still
               appears the moment there is a second device, and whenever the connection is

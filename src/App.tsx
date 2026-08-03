@@ -22,7 +22,7 @@
  *
  * Component tree:
  *   App
-*   ├── GoalBar           — the goal; the run total, once the run has ended
+ *   ├── GoalBar           — what the user asked for, in their own words
  *   ├── column
  *   │   ├── WorkingColumn — receipts / focus card (transcript + calls) / ghosts
  *   │   ├── PlanColumn    — the plan forming, then PlanCard + ProposalList
@@ -97,10 +97,15 @@ interface UiState {
   /** Pre-planning confirmation gate from the cloud. */
   understanding: Understanding | null;
   /**
-   * The goal in words, for the goal bar. This surface never SENDS `user_goal` (v4.1 —
-   * Bixby owns goal entry), so the only place the goal text reaches us is the cloud's
-   * `understanding.objective`. Kept in state because the understanding frame itself is
-   * cleared the moment the gate is answered.
+   * The goal in words, for the goal bar — WHAT THE USER SAID, not what the agent made
+   * of it. This surface never SENDS `user_goal` (v4.1 — Bixby owns goal entry), so the
+   * words arrive on `chat_ui_open.goal_text` (v7.4). Kept in state because the frames
+   * that carry it are cleared the moment the gate is answered.
+   *
+   * v9: `understanding` no longer overwrites this with `payload.objective`. The bar is
+   * the request and the confirm card's heading is the agent's restatement of it — two
+   * different things, and seeing them differ is the entire point of a confirm gate.
+   * The objective is only a fallback, for a surface rehydrated without the open frame.
    */
   goalText: string;
   /** Locally declined goal; late frames for it are ignored. */
@@ -573,7 +578,24 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
       return {
         ...withGoal,
         understanding: message,
-        goalText: message.payload.objective || withGoal.goalText,
+        /*
+         * v9 — KEEP THE USER'S OWN WORDS. This used to be
+         * `message.payload.objective || withGoal.goalText`, which overwrote what the
+         * user actually said with the cloud's restatement of it. Both then rendered:
+         * the goal bar showed the objective and the confirm card's heading showed the
+         * same objective again, one directly above the other.
+         *
+         * v7.4 had already fixed the supply side — `chat_ui_open` carries `goal_text`,
+         * the words Bixby heard — so the spoken sentence was in state and was being
+         * thrown away a moment later. The duplication was survivable while an eyebrow
+         * sat between the two; with that gone it reads as a stutter.
+         *
+         * The two are DIFFERENT THINGS and each belongs where it is: the bar is what
+         * you asked for, the heading is what the agent understood. Seeing them differ
+         * is the entire point of a confirm gate. The objective is still the fallback,
+         * for a surface rehydrated without ever seeing the open frame.
+         */
+        goalText: withGoal.goalText || message.payload.objective,
         working: false,
         phase: maxRailPhase(withGoal.phase, "confirming"),
       };
@@ -1319,8 +1341,6 @@ export default function App() {
               : undefined
         }
         fallback={state.plan ? "Your plan" : "Waiting for a goal…"}
-        startedAt={runStartedAt}
-        endedAt={runEndedAt}
         deviceLabel={pairedDevice?.device_name ?? state.boundDeviceId}
         deviceCount={state.deviceChoices?.length ?? 0}
         connection={connection}
