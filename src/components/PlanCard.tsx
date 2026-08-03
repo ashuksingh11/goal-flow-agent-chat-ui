@@ -2,8 +2,8 @@
  * PlanCard — the plan, once it has landed (v5.2 panel design, Pencil frame 3).
  *
  * Anatomy, top to bottom:
- *   ✓ Plan ready · 7 steps · 5 constraints honoured   ← the arrival
- *   [Safety gate passed]  [Why this plan]              ← how it was checked
+ *   ✓ Composed your plan · 7 steps · 5 honoured · 10.6s   [Details]  ← the arrival
+ *   [Safety gate passed]                               ← how it was checked
  *   allergens peanuts · dietary no_pork · …            ← what it knew (credibility)
  *   Mon, Jul 27  Chickpea Salad Bowl              ⌄    ← the plan itself, one row per
  *      detail + why + tags (the open row)                step, first row open
@@ -18,12 +18,21 @@
  * Only one row is open at a time: this panel has one screen's worth of height and no page
  * scroll, so an accordion keeps the whole plan visible while still letting any single step
  * be read in full.
+ *
+ * v9 — THE RUN RECEDES HERE. "Composing your plan…" settles into "Composed your plan":
+ * same words, same place, past tense, and the spinner's slot is taken by the green disc so
+ * the eye does not have to re-find where the answer went. The run's duration appears here
+ * and ONLY here — while it is working there is no clock anywhere, because a counter beside
+ * a spinner is a second live region for one fact. Its evidence moves behind [Details],
+ * which is quieter than the accent pill it replaced: on this screen the accent belongs to
+ * "Approve & Save".
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ApprovalDecision, PresentPlan } from "../types/contract";
 import type { ProposalStatusMap } from "../types/ui";
 import { formatWhen } from "../lib/date";
+import { Icon } from "./Icon";
 import { ProposalList } from "./ProposalList";
 
 type PlanMorph = { prevTitle: string; prevDetail?: string };
@@ -38,8 +47,24 @@ export interface PlanCardProps {
   morphSeq?: number;
   /** Impact labels changed by the most recent adaptation. */
   changedImpactLabels?: string[];
+  /**
+   * Wall-clock of the whole run, once it has ended.
+   *
+   * This is the ONLY place the duration is shown. While the run is going there is no
+   * clock anywhere — a counter beside a spinner is a second live region for one fact,
+   * and it counts up, so it reads as a stopwatch on a late train. Settled, next to the
+   * result it produced, the same number is information: "that took eleven seconds."
+   */
+  composedMs?: number | null;
   proposalStatuses: ProposalStatusMap;
   onDecide: (decisions: ApprovalDecision[]) => void;
+}
+
+/** 10600 → "10.6s"; 74000 → "1m 14s". Sub-minute keeps a decimal, past that it is noise. */
+function composedIn(ms: number): string {
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const total = Math.round(ms / 1000);
+  return `${Math.floor(total / 60)}m ${total % 60}s`;
 }
 
 export function knewValue(value: unknown): string {
@@ -56,6 +81,7 @@ export function PlanCard({
   morphs = {},
   morphSeq = 0,
   changedImpactLabels = [],
+  composedMs = null,
   proposalStatuses,
   onDecide,
 }: PlanCardProps) {
@@ -89,17 +115,34 @@ export function PlanCard({
 
   return (
     <article className="result-card" aria-label="Proposed plan">
+      {/*
+        The arrival. "Composing your plan…" settles into "Composed your plan" — same
+        words, same place, past tense — and the spinner's slot is taken by a green disc,
+        so the eye does not have to re-find where the answer went. Everything about the
+        RUN recedes here and the plan becomes the subject; the run's evidence is still one
+        tap away behind Details, it just stops competing with the thing it produced.
+      */}
       <header className="result__head">
-        <i className={`result__mark result__mark--${passed ? "ok" : "blocked"}`} aria-hidden>
-          {passed ? "✓" : "!"}
+        <i className={`result__mark result__mark--${passed ? "ok" : "blocked"}`}>
+          {passed ? <Icon name="check" size={17} strokeWidth={2.5} /> : "!"}
         </i>
         <div className="result__titles">
-          <h2 className="result__title">{passed ? "Plan ready" : "Plan blocked"}</h2>
+          <h2 className="result__title">{passed ? "Composed your plan" : "Plan blocked"}</h2>
           <p className="result__sub">
             {payload.plan.length} step{payload.plan.length === 1 ? "" : "s"}
             {knewChips.length > 0 ? ` · ${knewChips.length} constraints honoured` : ""}
+            {composedMs !== null ? ` · ${composedIn(composedMs)}` : ""}
           </p>
         </div>
+        {payload.explanation ? (
+          <details className="result__why">
+            <summary className="result__why-summary">
+              <Icon name="chevron-down" size={16} />
+              Details
+            </summary>
+            <p className="result__why-body">{payload.explanation}</p>
+          </details>
+        ) : null}
       </header>
 
       <div className="result__badges">
@@ -107,14 +150,9 @@ export function PlanCard({
           className={`safety-pill safety-pill--${payload.safety.gate}`}
           title={payload.safety.violations.join(", ")}
         >
-          {passed ? "✓ Safety gate passed" : `Blocked — ${payload.safety.violations.length} violation(s)`}
+          {passed ? <Icon name="shield-check" size={15} /> : null}
+          {passed ? "Safety gate passed" : `Blocked — ${payload.safety.violations.length} violation(s)`}
         </span>
-        {payload.explanation ? (
-          <details className="why-plan">
-            <summary className="why-plan__summary">Why this plan</summary>
-            <p className="why-plan__body">{payload.explanation}</p>
-          </details>
-        ) : null}
       </div>
 
       {knewChips.length > 0 ? (

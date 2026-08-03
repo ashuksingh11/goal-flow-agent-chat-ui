@@ -1373,6 +1373,9 @@ export default function App() {
                 morphs={state.planMorphs}
                 morphSeq={state.morphSeq}
                 changedImpactLabels={state.changedImpactLabels}
+                composedMs={
+                  runStartedAt !== null && runEndedAt !== null ? runEndedAt - runStartedAt : null
+                }
                 proposalStatuses={state.proposalStatuses}
                 onDecide={(decisions) =>
                   sendDecisions(state.plan!.goal_id, state.plan!.correlation_id, decisions)

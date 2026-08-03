@@ -34,6 +34,7 @@ import { useMemo, useState } from "react";
 
 import type { ApprovalDecision, PlanProposal } from "../types/contract";
 import type { ProposalStatusMap } from "../types/ui";
+import { Icon } from "./Icon";
 
 export interface ProposalListProps {
   proposals: PlanProposal[];
@@ -110,8 +111,8 @@ export function ProposalList({ proposals, statuses, onDecide }: ProposalListProp
 
       {receipts.map((proposal) => (
         <p key={proposal.proposal_id} className="approval-receipt">
-          <i className="approval-receipt__mark" aria-hidden>
-            ✓
+          <i className="approval-receipt__mark">
+            <Icon name="check" size={15} strokeWidth={2.25} />
           </i>
           <span className="approval-receipt__label">{proposal.action}</span>
           <span className="approval-receipt__note">
@@ -152,7 +153,7 @@ export function ProposalList({ proposals, statuses, onDecide }: ProposalListProp
                     ? "Waiting for your Family Hub…"
                     : status.approved === false
                       ? "Not included"
-                      : `Added ✓${status.detail ? ` — ${status.detail}` : ""}`
+                      : `Added${status.detail ? ` — ${status.detail}` : ""}`
                   : firm && !on
                     ? `Not included — ${proposal.reason}`
                     : proposal.reason}
@@ -172,7 +173,8 @@ export function ProposalList({ proposals, statuses, onDecide }: ProposalListProp
                 aria-pressed={on}
                 onClick={() => toggle(proposal.proposal_id)}
               >
-                {on ? "✓ Included" : "+ Include"}
+                <Icon name={on ? "check" : "plus"} size={16} strokeWidth={2.25} />
+                {on ? "Included" : "Include"}
               </button>
             ) : null}
           </div>
@@ -192,11 +194,19 @@ export function ProposalList({ proposals, statuses, onDecide }: ProposalListProp
           <button type="button" className="btn btn--primary btn--commit" onClick={commit}>
             Approve &amp; Save
           </button>
+          {/*
+            The left-out actions are QUOTED, not lowercased into the sentence.
+            `action` is an imperative — "Place the grocery order" — so folding it into a
+            noun slot produced "Saves 3 of 4 actions — place the grocery order won't
+            happen.", which is not English. Quoting turns the imperative into a name, and
+            that stays grammatical for any action string the device sends, which a
+            hand-tuned phrase would not.
+          */}
           <p className="approvals__consequence">
             {leftOut.length === 0
               ? `Saves all ${includedCount} action${includedCount === 1 ? "" : "s"}.`
               : `Saves ${includedCount} of ${required.length} actions — ${leftOut
-                  .map((p) => p.action.toLowerCase())
+                  .map((p) => `“${p.action}”`)
                   .join(", ")} won't happen.`}
           </p>
         </>
