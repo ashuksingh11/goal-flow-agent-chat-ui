@@ -140,9 +140,49 @@
   margin: 0; font-size: clamp(1.3rem, 3.2vw, 1.7rem); font-weight: 700;
   letter-spacing: -0.025em; line-height: 1.15; color: var(--ink);
 }
-.declined__quote { margin: 0; font-size: 0.95rem; font-style: italic; color: var(--ink-faint); }
-.declined__body { margin: 0; font-size: 1.03rem; line-height: 1.55; color: var(--ink-dim); }
-.declined__foot { margin: 0; font-size: 0.82rem; color: var(--ink-faint); }
+.declined__quote { margin: 0; font-size: var(--fs-sub); font-style: italic; color: var(--ink-quiet); }
+.declined__body { margin: 0; font-size: var(--fs-lead); line-height: 1.55; color: var(--ink-dim); }
+
+/* The way out. This row used to be one grey sentence and a server-side timer — the
+   reader had no move to make but wait. The button is the agency; the countdown beside it
+   is a courtesy, and it is only drawn when the cloud actually told us a deadline. */
+.declined__foot {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: 0.35rem 0 0;
+}
+.declined__note { flex: 1; min-width: 12ch; font-size: var(--fs-meta); color: var(--ink-quiet); }
+.declined__close { flex: 0 0 auto; }
+
+.countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--ink-quiet);
+  font-size: var(--fs-meta);
+  font-weight: 500;
+}
+.countdown__ring { flex: 0 0 auto; transform: rotate(-90deg); }
+/* LINEAR, and it runs exactly once. A clock that eases lies about how much time is
+   left — the last second would crawl while the middle rushed. Every other motion in
+   this panel is eased precisely because it is physical and this one is not. */
+.countdown__sweep {
+  stroke-dashoffset: 0;
+  animation-name: countdown-drain;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+  animation-iteration-count: 1;
+}
+@keyframes countdown-drain {
+  to { stroke-dashoffset: var(--c); }
+}
+/* Reduced motion keeps the COUNT and drops the sweep: this is information, not
+   decoration, so it degrades to the label ticking rather than disappearing. */
+@media (prefers-reduced-motion: reduce) {
+  .countdown__sweep { animation: none; stroke-dashoffset: 0; opacity: 0.35; }
+}
 
 /* ---------------------- frame 1 · confirm understanding ------------------ */
 

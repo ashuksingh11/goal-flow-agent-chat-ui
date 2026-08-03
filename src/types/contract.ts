@@ -643,6 +643,15 @@ export interface Notice {
   goal_id: string;
   kind: "out_of_scope" | "declined" | "updating_goals";
   message: string;
+  /**
+   * v9: seconds until the cloud closes this webview, when a close is already
+   * scheduled (today: the out-of-scope refusal). Absent means no scheduled close.
+   *
+   * It rides the wire rather than being duplicated here because a countdown the UI
+   * guessed would drift silently the first time the cloud's dwell changed — the same
+   * class of untruth as a determinate bar over an indeterminate run.
+   */
+  closes_in_s?: number | null;
 }
 
 // ---------------------------------------------------------------------------

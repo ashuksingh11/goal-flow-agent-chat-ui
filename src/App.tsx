@@ -43,6 +43,8 @@ import { StatusTimeline } from "./components/StatusTimeline";
 import { WorkingColumn } from "./components/WorkingColumn";
 import { UnderstandingCard } from "./components/UnderstandingCard";
 import { DevicePicker } from "./components/DevicePicker";
+import { CountdownRing } from "./components/CountdownRing";
+import { Icon } from "./components/Icon";
 import { createGoalFlowSocket, getDeviceId, getGoalId, getRememberedDeviceId, rememberDeviceId } from "./lib/ws";
 import type { ConnectionState, GoalFlowSocket } from "./lib/ws";
 import type {
@@ -166,6 +168,12 @@ interface UiState {
    * bracket a few seconds later, so there is no dismiss button: nothing here needs doing.
    */
   declined: string | null;
+  /**
+   * v9: seconds the refusal card has before the cloud closes the webview, straight off
+   * the notice frame. Null when the cloud scheduled no close — and then the card shows
+   * no countdown at all rather than inventing a deadline it cannot know.
+   */
+  declinedClosesIn: number | null;
   /** Sustain ticks for StatusTimeline (capped). */
   ticks: Status[];
   demoClock: DemoClock;
@@ -215,6 +223,7 @@ const INITIAL_STATE: UiState = {
   saving: null,
   pendingClose: null,
   declined: null,
+  declinedClosesIn: null,
   ticks: [],
   demoClock: INITIAL_DEMO_CLOCK,
   transcript: [],
@@ -501,6 +510,7 @@ function closeCreatePhase(state: UiState): UiState {
     saving: null,
     pendingClose: null,
     declined: null,
+  declinedClosesIn: null,
   };
 }
 
@@ -590,6 +600,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
           { kind: "note", id: withGoal.nextId, text: message.message },
         ],
         declined: message.message,
+        declinedClosesIn: message.closes_in_s ?? null,
         declinedGoalId: message.goal_id,
         understanding: null,
         goalText: "",
@@ -633,6 +644,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         activeGoalId: message.goal_id,
         declinedGoalId: null,
         declined: null,
+        declinedClosesIn: null,
         understanding: null,
         // v7.4: the open now carries what the user SAID, and it arrives ~10-60s before
         // the understanding does. Without it the bar reads "Waiting for a goal…" for the
@@ -1331,12 +1343,36 @@ export default function App() {
             {state.declined ? (
               <article className="declined" aria-label="Not something this home can do">
                 <header className="declined__head">
-                  <span className="declined__mark" aria-hidden>🤔</span>
+                  <span className="declined__mark">
+                    <Icon name="ban" size={22} />
+                  </span>
                   <h2 className="declined__title">That one isn't mine to take</h2>
                 </header>
                 {goalText ? <p className="declined__quote">“{goalText}”</p> : null}
                 <p className="declined__body">{state.declined}</p>
-                <p className="declined__foot">Nothing was created on your board.</p>
+                {/*
+                  v9 — the user is not made to wait this out.
+                  The card used to auto-dismiss with no way to act: the only thing between
+                  the reader and their kitchen was a sentence and a server-side timer.
+                  Now the close is a button, and the countdown beside it is REAL — the
+                  seconds come off the notice frame, not from a constant copied over here.
+                  When the cloud schedules no close, `declinedClosesIn` is null and no
+                  countdown is drawn at all, because inventing one would be the same
+                  untruth as a determinate bar over an indeterminate run.
+                */}
+                <div className="declined__foot">
+                  {state.declinedClosesIn !== null ? (
+                    <CountdownRing seconds={state.declinedClosesIn} />
+                  ) : null}
+                  <span className="declined__note">Nothing was created on your board.</span>
+                  <button
+                    type="button"
+                    className="btn btn--quiet declined__close"
+                    onClick={() => dispatch({ type: "close_now" })}
+                  >
+                    Close now
+                  </button>
+                </div>
               </article>
             ) : null}
 
