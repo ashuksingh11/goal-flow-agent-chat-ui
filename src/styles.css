@@ -21,7 +21,22 @@
   /* type */
   --ink: #1a1e2c;
   --ink-dim: #5c6377;
-  --ink-faint: #949bb0;
+
+  /* v9: the quiet ink. The old --ink-faint (#949bb0) measured 2.74:1 on white — it failed
+     WCAG AA *and* AA-large, while carrying every eyebrow, count, caption and note in the
+     product. On a fridge door read at 1-2 m in kitchen lighting that was the single worst
+     defect in the UI. #6e7690 is 4.51:1 and keeps the palette's character.
+     --ink-faint is kept as an alias ON PURPOSE: it has ~48 call sites across two
+     stylesheets, and aliasing fixes every one of them at once with no chance of missing a
+     usage. New and edited rules use --ink-quiet; the alias dies when the last one migrates. */
+  --ink-quiet: #6e7690;
+  --ink-faint: var(--ink-quiet);
+
+  /* v9: a border you can actually see. --stroke (#e2e6f0) is 1.23:1 against a white card,
+     so a ghost button drawn with it is invisible and reads as disabled — it failed WCAG
+     1.4.11, which wants 3:1 for the boundary of a control. --stroke stays for
+     non-interactive hairlines and dividers; anything the user can press uses this. */
+  --stroke-strong: #868fa6;
 
   /* the one accent + semantics */
   --accent: #3f6fe8;
@@ -41,6 +56,29 @@
   --tier-auto: var(--ink-faint);
   --tier-light: var(--accent);
   --tier-firm: var(--warn);
+
+  /* v9 TYPE SCALE — seven steps, and only seven.
+     The panel had 26 distinct font sizes, including 0.8/0.82, 0.75/0.76/0.78 and
+     0.92/0.95 — pairs that are visually identical but structurally different. Craft means
+     every value is one you can defend, and half a step is not defensible. Each step is
+     fluid so the panel keeps scaling with its container instead of snapping at a
+     breakpoint; the ceilings are the design's px values at the 760px panel width.
+     Roles: display = the one strongest heading on a screen · title = board/card titles ·
+     lead = quoted goal, emphasised values, body paragraphs · body = button labels ·
+     sub = list-row titles · meta = counts, sources, notes · micro = all-caps eyebrows. */
+  --fs-display: clamp(1.5rem, 3.9vw, 1.875rem);   /* 30px */
+  --fs-title: clamp(1.25rem, 3.1vw, 1.5rem);      /* 24px */
+  --fs-lead: clamp(1.1rem, 2.6vw, 1.25rem);       /* 20px */
+  --fs-body: clamp(1rem, 2.2vw, 1.0625rem);       /* 17px */
+  --fs-sub: clamp(0.9rem, 1.95vw, 0.9375rem);     /* 15px */
+  --fs-meta: clamp(0.8rem, 1.7vw, 0.8125rem);     /* 13px */
+  --fs-micro: clamp(0.68rem, 1.45vw, 0.6875rem);  /* 11px */
+
+  /* Tracking is size-specific — a single letter-spacing is wrong somewhere. Large text
+     reads too loose as it grows, small caps read too tight. */
+  --ls-display: -0.02em;
+  --ls-tight: -0.01em;
+  --ls-micro: 0.14em;
 
   /* shape + depth */
   --radius-s: 8px;
