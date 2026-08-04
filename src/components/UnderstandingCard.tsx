@@ -31,14 +31,32 @@
  */
 
 import { useState } from "react";
-import type { AppliedPreference, PlanKnew, ProposedConstraint } from "../types/contract";
+import type {
+  AppliedConstraint,
+  AppliedPreference,
+  PlanKnew,
+  ProposedConstraint,
+  TimeWindow,
+} from "../types/contract";
+import { formatWhen } from "../lib/date";
 import { Icon, type IconName } from "./Icon";
 import { knewValue } from "./PlanCard";
 
 export interface UnderstandingCardProps {
   objective: string;
   constraints: PlanKnew;
+  /** v9: rendered for a CAPTURE only — on a goal gate it restated the heading. */
   thought: string;
+  /**
+   * v9: back, and for the LABEL rather than the provenance caption v9 deleted. Every
+   * store entry carries product-authored human text — "peanut allergy", "low sodium",
+   * "no pork" — and the chips were rendering the enforcement TOKENS beside it
+   * (`rohan_low_sodium`, `no_pork`). The identifier a rule is checked by is not the
+   * sentence a person reads.
+   */
+  applied?: AppliedConstraint[];
+  /** v9: the window the plan will cover — the one fact the deleted thought sentence had. */
+  window?: TimeWindow;
   /** v7: the soft half — shown as its own lighter section below the chips. */
   preferences?: AppliedPreference[];
   /** v6-M4: household rules the user just stated, offered for confirmation. */
@@ -96,10 +114,39 @@ function labelOf(key: string): string {
   return key.replace(/[_-]+/g, " ").toUpperCase();
 }
 
+/**
+ * Chip key → store kind, for the two the cloud renames on the way out. Everything else
+ * is already its own kind, and a key with no entry here simply keeps its raw value.
+ */
+const CHIP_KIND: Record<string, string> = {
+  "peak tariff": "peak_hours",
+  away: "away_window",
+};
+
+/**
+ * Last resort when no entry authored a label: "rohan_low_sodium" → "rohan low sodium".
+ * UNDERSCORES ONLY — a hyphen in one of these values is a date ("2026-08-06–2026-08-07")
+ * or a real hyphenated word, and taking it out leaves neither.
+ */
+function humanize(text: string): string {
+  return text.replace(/_+/g, " ");
+}
+
+/** "Tue, Aug 4 – Sun, Aug 9", or null when the window is absent or unreadable. */
+function windowLabel(window: TimeWindow | undefined): string | null {
+  const start = formatWhen(window?.start);
+  const end = formatWhen(window?.end);
+  if (!start && !end) return null;
+  if (!end || start === end) return start;
+  return start ? `${start} – ${end}` : end;
+}
+
 export function UnderstandingCard({
   objective,
   constraints,
   thought,
+  applied = [],
+  window,
   preferences = [],
   proposed = [],
   captureOnly = false,
@@ -107,9 +154,23 @@ export function UnderstandingCard({
   onDecline,
   resolved,
 }: UnderstandingCardProps) {
+  // The authored label per store kind, joined when a kind unions several entries — two
+  // allergen entries are "peanut allergy, shellfish allergy", not "peanuts, shellfish".
+  const labels = new Map<string, string>();
+  for (const row of applied) {
+    if (!row.kind || !row.label) continue;
+    const seen = labels.get(row.kind);
+    labels.set(row.kind, seen ? `${seen}, ${row.label}` : row.label);
+  }
+
   const chips = Object.entries(constraints)
-    .map(([key, value]) => [key, knewValue(value)] as const)
+    .map(([key, value]) => {
+      const authored = labels.get(CHIP_KIND[key] ?? key);
+      return [key, authored ?? humanize(knewValue(value))] as const;
+    })
     .filter(([, text]) => text !== "");
+
+  const covers = windowLabel(window);
 
   // Ticked by default: the user just SAID this, so pre-selecting matches what they
   // asked for and confirming is one click. It is still an explicit tick they can
@@ -131,6 +192,12 @@ export function UnderstandingCard({
       <header className="confirm-card__head">
         {captureOnly ? <span className="panel-eyebrow">Something to remember</span> : null}
         <h2 className="confirm-card__title">{objective}</h2>
+        {/* v9: what the deleted thought sentence was actually FOR. It read "I'll shape a
+            meal plan for 2026-08-04 to 2026-08-09 while honoring 3 household constraints,
+            then have your Family Hub build the plan" — a restatement of the heading, a
+            count the chips below already make, and a promise about the next screen. The
+            one fact in it that appeared nowhere else was the window, in ISO. */}
+        {covers && !captureOnly ? <p className="confirm-card__covers">{covers}</p> : null}
       </header>
 
       {chips.length > 0 ? (
@@ -170,9 +237,12 @@ export function UnderstandingCard({
         <section className="prefs" aria-label="Preferences">
           <header className="constraints__head">
             <span className="panel-eyebrow">Preferences</span>
-            <span className="panel-meta">{preferences.length} applied</span>
+            {/* v9: "shape the plan, never block it" replaces both the count and the note
+                under it. The count was arithmetic on a list you can see the length of;
+                the note was a sentence saying what this meta line now says in five
+                words, one line lower down and in the reading path. */}
+            <span className="panel-meta">shape the plan, never block it</span>
           </header>
-          <p className="prefs__note">Preferences shape the plan. They never block it.</p>
           {/* v9: an unboxed, dense list. It used to be an outlined box on the same 18px
               radius and the same anatomy as a constraint chip, so the two read as one
               object in two skins — and the ONE thing this screen exists to teach is that
@@ -225,7 +295,10 @@ export function UnderstandingCard({
         </section>
       ) : null}
 
-      {thought ? <p className="confirm-card__thought">{thought}</p> : null}
+      {/* v9: `thought` is no longer rendered on a goal gate — see the header. It IS still
+          rendered for a capture, where nothing else on the card explains why a rule is
+          being offered rather than a plan being made. */}
+      {captureOnly && thought ? <p className="confirm-card__thought">{thought}</p> : null}
 
       {resolved ? (
         <p className="confirm-card__resolved">

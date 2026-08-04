@@ -211,6 +211,14 @@
   letter-spacing: var(--ls-display);   /* large text wants negative tracking */
   color: var(--ink);
 }
+/* The window the plan covers, under the goal it covers it for. Quiet: it is context for
+   the heading, not a second heading. */
+.confirm-card__covers {
+  margin: 0.15rem 0 0;
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--ink-quiet);
+}
 .confirm-card__thought {
   margin: 0;
   font-size: var(--fs-lead);
