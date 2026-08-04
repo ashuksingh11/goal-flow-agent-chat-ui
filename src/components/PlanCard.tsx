@@ -32,7 +32,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ApprovalDecision, PresentPlan } from "../types/contract";
 import type { ProposalStatusMap } from "../types/ui";
 import { formatWhen } from "../lib/date";
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
 import { ProposalList } from "./ProposalList";
 
 type PlanMorph = { prevTitle: string; prevDetail?: string };
@@ -65,6 +65,68 @@ function composedIn(ms: number): string {
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
   const total = Math.round(ms / 1000);
   return `${Math.floor(total / 60)}m ${total % 60}s`;
+}
+
+/**
+ * WHAT A PLAN ROW IS, as a mark — v9.
+ *
+ * Seven rows of near-identical text is a list you scan rather than read, and the one
+ * thing that differs most between them (a dinner, a trip day, an appliance run) was
+ * carried only by the words. The mark is derived from the row's own tags and title, in
+ * that order: tags are authored data, the title is prose the model wrote.
+ *
+ * DOMAIN-AGNOSTIC, like everything else on this card — the table is keyed on what a row
+ * DOES, not on which of the six domains it came from, so a goal we have not thought of
+ * still gets a sensible mark instead of a wrong one. The list stays SHORT on purpose;
+ * what a no-match falls back to is decided by the plan, not by adding words. See
+ * planMarks.
+ */
+const ROW_MARKS: { match: RegExp; icon: IconName }[] = [
+  { match: /shop|grocer|order|restock|buy|list/i, icon: "cart" },
+  { match: /remind|notify|announce|tell|message/i, icon: "bell" },
+  { match: /dishwash|laundry|oven|preheat|appliance|energy|tariff|power|charge|run /i, icon: "zap" },
+  { match: /away|home|house|secur|lock|thermostat|vacuum|clean/i, icon: "house" },
+  { match: /workout|training|exercise|gym|activity/i, icon: "dumbbell" },
+  { match: /meal|dinner|lunch|recipe|cook|bake|salad|curry|wrap|soup|bowl|fish|chicken|paneer|traybake/i, icon: "utensils" },
+];
+
+function matchMark(item: { title: string; tags: string[]; status?: string }): IconName | null {
+  // A skipped row is a fact about the DAY, not about what was going to happen on it —
+  // the reason it is skipped (an away window) outranks whatever the row used to be.
+  if (item.status === "skipped") return "plane";
+  const haystack = `${item.tags.join(" ")} ${item.title}`;
+  return ROW_MARKS.find((m) => m.match.test(haystack))?.icon ?? null;
+}
+
+/**
+ * The marks for a whole plan — and the reason this is a plan-level function rather than a
+ * row-level one.
+ *
+ * Matched live, "Lemon herb fish with greens" and "Chickpea salad bowl" found `utensils`
+ * while "Turkey stir-fry with peppers" and "Milk and fruit snack" fell through to the
+ * generic pin, in the same seven-row meal plan. The obvious fix is more food words, which
+ * is a word list that grows forever and is wrong for the seventh domain nobody has built
+ * yet. The rows of one plan are nearly always the same KIND of thing, so an unmatched row
+ * takes the plan's dominant mark instead — the list stays small, and a plan of any domain
+ * ends up internally consistent.
+ *
+ * `plane` is excluded from the vote: a skipped day is the exception in its plan by
+ * definition, and letting one away day mark six dinners with an aeroplane would be worse
+ * than any fallback.
+ */
+export function planMarks(items: { title: string; tags: string[]; status?: string }[]): IconName[] {
+  const matched = items.map(matchMark);
+  const votes = new Map<IconName, number>();
+  for (const mark of matched) {
+    if (!mark || mark === "plane") continue;
+    votes.set(mark, (votes.get(mark) ?? 0) + 1);
+  }
+  let dominant: IconName = "pin";
+  let best = 0;
+  for (const [mark, count] of votes) {
+    if (count > best) [dominant, best] = [mark, count];
+  }
+  return matched.map((mark) => mark ?? dominant);
 }
 
 export function knewValue(value: unknown): string {
@@ -112,6 +174,9 @@ export function PlanCard({
         .filter(([, text]) => text !== "")
     : [];
   const passed = payload.safety.gate === "passed";
+  // Computed once for the plan, not per row — an unmatched row borrows the plan's own
+  // dominant mark. See planMarks.
+  const marks = useMemo(() => planMarks(payload.plan), [payload.plan]);
 
   return (
     <article className="result-card" aria-label="Proposed plan">
@@ -155,16 +220,20 @@ export function PlanCard({
         </span>
       </div>
 
-      {knewChips.length > 0 ? (
-        <p className="knew" aria-label="What it knew">
-          {knewChips.map(([key, text]) => (
-            <span key={key} className="knew__pair">
-              <span className="knew__key">{key.replace(/[_-]+/g, " ")}</span>
-              <strong className="knew__value">{text}</strong>
-            </span>
-          ))}
-        </p>
-      ) : null}
+      {/*
+        v9 — THE "WHAT IT KNEW" STRIP IS GONE, and the count it fed stays.
+
+        It listed every constraint and preference in enforcement tokens —
+        `allergens peanuts · dietary no_pork · medical rohan_low_sodium · prefer
+        prefer_white_meat, chicken_turkey_fish_over_red_meat,
+        match_protein_to_activity_load` — directly under a heading saying the plan was
+        composed. The user had read all of it two screens earlier, on the confirm gate,
+        in a form built to be read; here it was a database row, and the `prefer` list
+        alone ran to three snake_case tokens on one line.
+
+        `knewChips` survives because "4 constraints honoured" above is the honest,
+        one-word version of the same fact.
+      */}
 
       <ol className="days">
         {payload.plan.map((item, index) => {
@@ -190,6 +259,10 @@ export function PlanCard({
                 onClick={() => setOpenId(open ? null : item.id)}
               >
                 <span className="day__when">{when}</span>
+                {/* The mark, between the date and the title: what KIND of thing this row
+                    is, before the words say which one. Seven rows of near-identical text
+                    is a list you scan; a row you can recognise is one you read. */}
+                <Icon name={marks[index]} size={18} className="day__mark" />
                 <span className="day__titles">
                   {/* Explicit "Cancelled → New" framing: the labels carry the story even
                       when old and new titles are near-identical, and the cancelled line

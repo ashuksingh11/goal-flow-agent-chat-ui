@@ -53,7 +53,12 @@ export type IconName =
   | "utensils"
   | "dumbbell"
   | "house"
-  | "zap";
+  | "zap"
+  // v9: plan-row marks. `plane` replaces the literal "✈ " a skipped row used to carry;
+  // `cart` and `bell` are the other two things a plan row ever turns out to be.
+  | "plane"
+  | "cart"
+  | "bell";
 
 /** Each entry is a list of `d` attributes stroked in order. No fills — one visual weight. */
 const PATHS: Record<IconName, string[]> = {
@@ -114,6 +119,13 @@ const PATHS: Record<IconName, string[]> = {
   dumbbell: ["M4 9.5v5", "M7 7v10", "M17 7v10", "M20 9.5v5", "M7 12h10"],
   house: ["M3.5 11 12 4l8.5 7", "M5.5 9.8V20h13V9.8"],
   zap: ["M13 2 4.5 13.5H11L10 22l8.5-11.5H12z"],
+  plane: ["M2.5 13.5 21 6l-7 15-2.8-6.4z", "M11.2 14.6 8 11.4"],
+  cart: [
+    "M3 4.5h2.2l2.3 9.8a2 2 0 0 0 2 1.55h6.6a2 2 0 0 0 1.95-1.53L19.8 8.5H6",
+    "M9.8 20a1.1 1.1 0 1 0 0-2.2 1.1 1.1 0 0 0 0 2.2z",
+    "M17.2 20a1.1 1.1 0 1 0 0-2.2 1.1 1.1 0 0 0 0 2.2z",
+  ],
+  bell: ["M6.5 16V10.5a5.5 5.5 0 0 1 11 0V16l1.5 2.5h-14z", "M10 21h4"],
 };
 
 export interface IconProps {

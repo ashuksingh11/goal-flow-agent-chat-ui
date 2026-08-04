@@ -850,7 +850,8 @@
 .day__row {
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(64px, 96px) 1fr auto auto;
+  /* v9: a fifth column for the row's mark, between the date and the title. */
+  grid-template-columns: minmax(64px, 96px) auto 1fr auto auto;
   align-items: center;
   gap: 0.9rem;
   padding: 0.7rem 0;
@@ -864,6 +865,10 @@
 }
 .day .day__row:active { transform: scale(0.995); }
 .day__when { font-size: 0.8rem; font-weight: 500; color: var(--ink-faint); }
+/* Quiet by default — it is a recognition aid, not a status. A SKIPPED row's plane is the
+   one that earns colour, because there the mark IS the news. */
+.day__mark { color: var(--ink-quiet); }
+.day--skipped .day__mark { color: var(--accent); }
 .day__titles { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
 .day__title { font-size: clamp(0.98rem, 2.2vw, 1.1rem); overflow-wrap: anywhere; font-weight: 600; letter-spacing: -0.015em; color: var(--ink); }
 .day__old { font-size: 0.78rem; color: var(--ink-faint); display: inline-flex; gap: 0.35rem; }
