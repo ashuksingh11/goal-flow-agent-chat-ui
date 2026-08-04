@@ -269,8 +269,14 @@ type UiAction =
  * 2200 because the cloud's own floor is 1.6 s (SAVE_DWELL_S) — at 1400 this one never
  * bound. With the run itself now ~11 s, a second and a half of hand-off reads as a
  * flicker rather than a transition.
+ *
+ * v9: 3800, tracking the cloud's 3.0 s. It stays ABOVE the cloud's floor on purpose — the
+ * cloud closes the bracket and this side has to already be willing to hold, or the two
+ * floors race and the screen ends on whichever timer happens to be shorter. Watched end to
+ * end, 2.2 s ended abruptly: the eye reaches the sentence about the Family Hub taking over
+ * roughly when the screen goes.
  */
-const MIN_SAVING_MS = 2200;
+const MIN_SAVING_MS = 3800;
 
 const MAX_TICKS = 40;
 
