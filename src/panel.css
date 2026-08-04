@@ -278,16 +278,9 @@
    0.7rem caption at 2.74:1, which on a fridge door is the same as not saying it. It
    takes the family's tone, so it reads as part of the same statement. */
 .constraint__mark { flex: 0 0 auto; opacity: 0.75; }
-/* v6 provenance, finally rendered (it has been on the wire since v6 and drawn
-   nowhere). Quiet by construction: the value is what the user reads, this only has
-   to be legible when they ask "says who?". */
-.constraint__source {
-  font-size: 0.7rem;
-  font-weight: 500;
-  line-height: 1.25;
-  color: var(--ink-faint);
-  overflow-wrap: anywhere;
-}
+/* v6's provenance caption (.constraint__source) is gone in v9 — it read "Account ·
+   always enforced" under every single chip. A caption identical on every row is
+   furniture, and the lock already says enforced. */
 /* The tone colours the value, the family icon and the lock together, so a chip reads as
    one statement rather than a tinted box with unrelated marks in it. This is the payoff
    of dropping emoji: an emoji cannot take the family's colour, an icon inherits it. */
@@ -347,17 +340,10 @@
   color: var(--ink-dim);
   overflow-wrap: anywhere;
 }
-/* Right-aligned and quiet: provenance answers "says who?" when asked, and the
-   answer genuinely differs per row (Account · taste vs Derived · fridge contents),
-   so it earns its place — just not in the reading path. */
-.pref__source {
-  flex: 0 0 auto;
-  font-size: var(--fs-meta);
-  font-weight: 500;
-  line-height: 1.25;
-  color: var(--ink-quiet);
-  text-align: right;
-}
+/* .pref__source is gone in v9. The claim it was justified by — "the answer genuinely
+   differs per row" — did not survive looking at a real run: every row said
+   "Account · relevance" or "Derived · relevance", i.e. the name of our own selection
+   pass, twice, in the reader's peripheral vision. */
 
 /* --- capture (v6-M4): rules the user stated, offered for confirmation ------
    Visually SEPARATE from the constraint chips above. Those are settled policy the

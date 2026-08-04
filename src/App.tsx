@@ -1415,7 +1415,6 @@ export default function App() {
                 objective={state.understanding.payload.objective}
                 constraints={state.understanding.payload.knew}
                 thought={state.understanding.payload.thought}
-                applied={state.understanding.payload.constraints}
                 preferences={state.understanding.payload.preferences}
                 proposed={state.understanding.payload.proposed_constraints}
                 captureOnly={state.understanding.payload.capture_only}
