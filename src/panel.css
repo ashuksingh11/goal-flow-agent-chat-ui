@@ -495,7 +495,10 @@
 }
 /* one block per engine that spoke — the label is what makes silence readable */
 .focus__block + .focus__block { margin-top: 0.75rem; }
-.focus__who { display: block; margin-bottom: 0.2rem; }
+/* The engine's name, and — since v9 — the verdict it ended on, so a section for an engine
+   that never narrated still carries the fact it reported. */
+.focus__who { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.2rem; }
+.focus__verdict { text-transform: none; letter-spacing: 0; color: var(--good); font-weight: 600; }
 /* pre-wrap belongs to the TEXT, not to the container: the container now holds elements,
    and preserving whitespace around them turns the markup's own indentation into blank
    lines that push later blocks out of the scroller. */

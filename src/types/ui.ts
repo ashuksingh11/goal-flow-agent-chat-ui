@@ -210,10 +210,13 @@ export const HARNESS_SETTLE_MS = 1600;
 export const HARNESS_PIPELINE: readonly { id: HarnessModule; label: string; glyph: string }[] = [
   { id: "precheck", label: "Pre-Check Engine", glyph: "📋" },
   { id: "capability_manager", label: "Capability Manager", glyph: "🧰" },
+  // v9: Task Manager is THIRD, not sixth. The device breaks the goal into tasks before it
+  // reads a single world fact — the rail said otherwise for four versions because the beat
+  // was fired where the ledger gets written rather than where the tasks get decided.
+  { id: "task_manager", label: "Task Manager", glyph: "🗂️" },
   { id: "grounding", label: "Grounding", glyph: "🌐" },
   { id: "planner", label: "Planner", glyph: "🗺️" },
   { id: "safety", label: "Safety Policy Engine", glyph: "🛡️" },
-  { id: "task_manager", label: "Task Manager", glyph: "🗂️" },
   { id: "approval", label: "Approval", glyph: "🙋" },
   { id: "monitor_adapt", label: "Monitor & Adapt", glyph: "📡" },
 ] as const;

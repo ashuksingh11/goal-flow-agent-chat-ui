@@ -120,11 +120,36 @@ export function WorkingColumn({
   // Cheap identity for "has anything been added": the effect below only needs to know
   // that the text grew, not what it says.
   const transcriptSize = blocks.reduce((n, b) => n + b.text.length + b.steps.length, 0);
-  // "Spoke" now means steps OR prose. Without the steps half, the planner — which since
-  // v7 reports its work in steps and still never narrates — would keep claiming silence
-  // directly above the three steps it had just reported.
-  const activeSpoke =
-    active !== null && blocks.some((b) => b.engine === active && (b.text !== "" || b.steps.length > 0));
+  /**
+   * THE RECORD IS PER ENGINE, AND EVERY ENGINE THAT RAN IS IN IT.
+   *
+   * The drawer used to render only the blocks the transcript produced, which in practice
+   * meant Grounding and nothing else: four of the seven engines never narrate — they
+   * report a verdict — so the record of a run showed one engine's words and no trace of
+   * the six other things that happened. "How it thought" answered for a seventh of the
+   * thinking.
+   *
+   * So the sections are driven by the PIPELINE, not by the transcript: every engine that
+   * has fired gets a row, carrying its prose and steps if it produced any and its own
+   * note + verdict if it did not. Silence stops being a gap in the record and becomes a
+   * fact with the engine's name on it — and the reader can see that Safety held three
+   * rules without having to know that Safety is one of the ones that never talks.
+   */
+  const sections = useMemo(() => {
+    const unattributed = blocks.filter((b) => b.engine === null);
+    const rows = ENGINES.filter((e) => {
+      const status = harness.engines[e.id].status;
+      return status !== "idle" || blocks.some((b) => b.engine === e.id);
+    }).map((e) => ({
+      key: e.id as string,
+      label: e.label,
+      cell: harness.engines[e.id],
+      blocks: blocks.filter((b) => b.engine === e.id),
+    }));
+    return unattributed.length > 0
+      ? [{ key: "unattributed", label: "Agent", cell: null, blocks: unattributed }, ...rows]
+      : rows;
+  }, [blocks, harness.engines]);
   /** The newest step from whichever engine is live — the one-line peek when it has no prose. */
   const lastStep = blocks
     .filter((b) => active === null || b.engine === active)
@@ -276,71 +301,79 @@ export function WorkingColumn({
   const drawer = (
     <div className="focus__drawer">
       <div className="focus__transcript" ref={bodyRef} aria-label="Reasoning">
-        {blocks.map((block, index) => (
-          <section key={`${block.engine ?? "unattributed"}:${index}`} className="focus__block">
+        {sections.map((section) => (
+          <section key={section.key} className="focus__block">
             <span className="panel-eyebrow focus__who">
-              {ENGINES.find((e) => e.id === block.engine)?.label ?? "Agent"}
+              {section.label}
+              {section.cell?.verdict ? (
+                <span className="focus__verdict">{section.cell.verdict}</span>
+              ) : null}
             </span>
-            {/* PROSE FIRST, steps under it. The narration is the engine SAYING
-                what it is about to do ("broke the goal into 8 steps: …") and the
-                steps are the receipt for it — printing the receipt above the
-                sentence that announces it reads backwards, and worse, it put the
-                steps of one engine directly under the previous engine's prose.
-                The caret still trails the prose, because that is what streams. */}
-            {/* Prose and REDACTIONS are different things and now look it. A blob
-                the model dumped mid-sentence used to be replaced by an
-                angle-bracket marker left inline in the paragraph, listing the
-                object's own field names — schema, in the middle of a sentence.
-                The fact worth keeping is that context was gathered; it gets a
-                row of its own and says so in words. */}
-            {splitTranscriptText(block.text).map((part, partIndex, parts) =>
-              part.kind === "context" ? (
-                <p key={`ctx-${partIndex}`} className="focus__ctx">
-                  <i className="focus__ctx-mark" aria-hidden>
-                    ▤
-                  </i>
-                  {part.label}
-                </p>
-              ) : (
-                <p key={`prose-${partIndex}`} className="focus__said">
-                  {part.text}
-                  {working &&
-                  index === blocks.length - 1 &&
-                  partIndex === parts.length - 1 &&
-                  block.engine === active ? (
-                    <span className="focus__caret" aria-hidden />
-                  ) : null}
-                </p>
-              ),
-            )}
-            {block.steps.length > 0 ? (
-              <ol className="focus__steps">
-                {block.steps.map((s) => (
-                  <li key={s.id} className={`focus__step focus__step--${s.tone}`}>
-                    <span className="focus__step-mark" aria-hidden>
-                      {s.tone === "notice" ? "!" : "✓"}
-                    </span>
-                    <span className="focus__step-body">
-                      <strong className="focus__step-label">{s.step}</strong>
-                      {s.detail ? <span className="focus__step-detail">{s.detail}</span> : null}
-                    </span>
-                  </li>
-                ))}
-              </ol>
+            {section.blocks.map((block, index) => (
+              <div key={`${section.key}:${index}`}>
+                {/* PROSE FIRST, steps under it. The narration is the engine SAYING
+                    what it is about to do ("broke the goal into 8 steps: …") and the
+                    steps are the receipt for it — printing the receipt above the
+                    sentence that announces it reads backwards, and worse, it put the
+                    steps of one engine directly under the previous engine's prose.
+                    The caret still trails the prose, because that is what streams. */}
+                {/* Prose and REDACTIONS are different things and now look it. A blob
+                    the model dumped mid-sentence used to be replaced by an
+                    angle-bracket marker left inline in the paragraph, listing the
+                    object's own field names — schema, in the middle of a sentence.
+                    The fact worth keeping is that context was gathered; it gets a
+                    row of its own and says so in words. */}
+                {splitTranscriptText(block.text).map((part, partIndex, parts) =>
+                  part.kind === "context" ? (
+                    <p key={`ctx-${partIndex}`} className="focus__ctx">
+                      <i className="focus__ctx-mark" aria-hidden>
+                        ▤
+                      </i>
+                      {part.label}
+                    </p>
+                  ) : (
+                    <p key={`prose-${partIndex}`} className="focus__said">
+                      {part.text}
+                      {working &&
+                      index === section.blocks.length - 1 &&
+                      partIndex === parts.length - 1 &&
+                      block.engine === active ? (
+                        <span className="focus__caret" aria-hidden />
+                      ) : null}
+                    </p>
+                  ),
+                )}
+                {block.steps.length > 0 ? (
+                  <ol className="focus__steps">
+                    {block.steps.map((s) => (
+                      <li key={s.id} className={`focus__step focus__step--${s.tone}`}>
+                        <span className="focus__step-mark" aria-hidden>
+                          {s.tone === "notice" ? "!" : "✓"}
+                        </span>
+                        <span className="focus__step-body">
+                          <strong className="focus__step-label">{s.step}</strong>
+                          {s.detail ? <span className="focus__step-detail">{s.detail}</span> : null}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                ) : null}
+              </div>
+            ))}
+            {/* An engine that never narrates is not a gap in the record. It said
+                something — a note on the way in and a verdict on the way out — and
+                that IS what it did. Four of the seven only ever speak this way. */}
+            {section.blocks.length === 0 ? (
+              <p className="focus__silent">
+                {section.cell?.note ??
+                  (section.key === "planner"
+                    ? "Composing in a single call — the model returns the finished plan rather than narrating its way there."
+                    : "Working without narration; it reports a verdict rather than its reasoning.")}
+              </p>
             ) : null}
           </section>
         ))}
-        {/* Silence is a fact about the engine, not a gap in the record — say so,
-            or an engine that never narrates reads as a transcript that got cut. */}
-        {active !== null && !activeSpoke ? (
-          <p className="focus__silent">
-            <strong>{activeMeta?.label ?? "This engine"}</strong> ·{" "}
-            {active === "planner"
-              ? "composing in a single call — the model returns the finished plan rather than narrating its way there."
-              : "working without narration; it reports a verdict rather than its reasoning."}
-          </p>
-        ) : null}
-        {blocks.length === 0 && active === null ? (
+        {sections.length === 0 ? (
           <span className="focus__empty">
             {working
               ? "The agent's thinking will appear here as it works."
