@@ -29,6 +29,12 @@
  *
  * The transcript lives behind "Show details" — it is evidence, not the headline, and at
  * 60-90s of streaming it would otherwise dominate a panel whose job is to show progress.
+ *
+ * v9 — AND IT SURVIVES THE RUN. When the plan arrived the focus card unmounted and took
+ * the model's prose with it: the one thing on this screen that shows the goal was
+ * REASONED about rather than looked up existed only while you were waiting, and was
+ * deleted at the exact moment you had time to read it. `compact` now keeps a second
+ * collapsed bar — closed, under the pipeline — holding the same transcript.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -258,6 +264,104 @@ export function WorkingColumn({
     </ol>
   );
 
+  /**
+   * The record of the run: what each engine said, and the tool calls behind it.
+   *
+   * ONE definition, rendered in two places — live inside the focus card's "Show details",
+   * and after the run inside the compact strip below. It used to exist only inside the
+   * focus card, which meant the model's own prose — the single most interesting artefact
+   * the run produces — was DESTROYED the moment the plan arrived, because the card that
+   * held it unmounted. The evidence for a plan should outlive the wait for it.
+   */
+  const drawer = (
+    <div className="focus__drawer">
+      <div className="focus__transcript" ref={bodyRef} aria-label="Reasoning">
+        {blocks.map((block, index) => (
+          <section key={`${block.engine ?? "unattributed"}:${index}`} className="focus__block">
+            <span className="panel-eyebrow focus__who">
+              {ENGINES.find((e) => e.id === block.engine)?.label ?? "Agent"}
+            </span>
+            {/* PROSE FIRST, steps under it. The narration is the engine SAYING
+                what it is about to do ("broke the goal into 8 steps: …") and the
+                steps are the receipt for it — printing the receipt above the
+                sentence that announces it reads backwards, and worse, it put the
+                steps of one engine directly under the previous engine's prose.
+                The caret still trails the prose, because that is what streams. */}
+            {/* Prose and REDACTIONS are different things and now look it. A blob
+                the model dumped mid-sentence used to be replaced by an
+                angle-bracket marker left inline in the paragraph, listing the
+                object's own field names — schema, in the middle of a sentence.
+                The fact worth keeping is that context was gathered; it gets a
+                row of its own and says so in words. */}
+            {splitTranscriptText(block.text).map((part, partIndex, parts) =>
+              part.kind === "context" ? (
+                <p key={`ctx-${partIndex}`} className="focus__ctx">
+                  <i className="focus__ctx-mark" aria-hidden>
+                    ▤
+                  </i>
+                  {part.label}
+                </p>
+              ) : (
+                <p key={`prose-${partIndex}`} className="focus__said">
+                  {part.text}
+                  {working &&
+                  index === blocks.length - 1 &&
+                  partIndex === parts.length - 1 &&
+                  block.engine === active ? (
+                    <span className="focus__caret" aria-hidden />
+                  ) : null}
+                </p>
+              ),
+            )}
+            {block.steps.length > 0 ? (
+              <ol className="focus__steps">
+                {block.steps.map((s) => (
+                  <li key={s.id} className={`focus__step focus__step--${s.tone}`}>
+                    <span className="focus__step-mark" aria-hidden>
+                      {s.tone === "notice" ? "!" : "✓"}
+                    </span>
+                    <span className="focus__step-body">
+                      <strong className="focus__step-label">{s.step}</strong>
+                      {s.detail ? <span className="focus__step-detail">{s.detail}</span> : null}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            ) : null}
+          </section>
+        ))}
+        {/* Silence is a fact about the engine, not a gap in the record — say so,
+            or an engine that never narrates reads as a transcript that got cut. */}
+        {active !== null && !activeSpoke ? (
+          <p className="focus__silent">
+            <strong>{activeMeta?.label ?? "This engine"}</strong> ·{" "}
+            {active === "planner"
+              ? "composing in a single call — the model returns the finished plan rather than narrating its way there."
+              : "working without narration; it reports a verdict rather than its reasoning."}
+          </p>
+        ) : null}
+        {blocks.length === 0 && active === null ? (
+          <span className="focus__empty">
+            {working
+              ? "The agent's thinking will appear here as it works."
+              : "This run produced no narration."}
+          </span>
+        ) : null}
+      </div>
+      <div className="focus__calls" aria-label="Capability calls">
+        <span className="panel-eyebrow">
+          {chips.length > 0 ? `${chips.length} tool calls` : "No tool calls yet"}
+        </span>
+        {chips.slice(-12).map((chip) => (
+          <span key={chip.id} className={`call call--${chip.state}`} title={chip.summary}>
+            <span aria-hidden>{chip.state === "done" ? "✓ " : "… "}</span>
+            {chip.module} · {chip.fn}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+
   if (compact) {
     return (
       <section className="run run--compact" aria-label="Harness run">
@@ -273,6 +377,25 @@ export function WorkingColumn({
           </summary>
           <div className="pipe pipe--inset">{pipeline}</div>
         </details>
+
+        {/* CLOSED by default, and second: the plan is the hero once the run is over, so
+            the reasoning is offered, not served. It only exists at all if the run left
+            words behind — an empty disclosure is a promise the record cannot keep. */}
+        {blocks.length > 0 ? (
+          <details className="pipe-collapsed">
+            <summary className="pipe-collapsed__bar">
+              <i className="pipe-collapsed__mark pipe-collapsed__mark--quiet">
+                <Icon name="lightbulb" size={14} strokeWidth={2} />
+              </i>
+              <span className="pipe-collapsed__label">
+                How it thought
+                {chips.length > 0 ? ` · ${chips.length} tool calls` : ""}
+              </span>
+              <Icon name="chevron-down" size={18} className="pipe-collapsed__chevron" />
+            </summary>
+            <div className="pipe--inset">{drawer}</div>
+          </details>
+        ) : null}
       </section>
     );
   }
@@ -321,90 +444,7 @@ export function WorkingColumn({
               <Icon name={detailsOpen ? "chevron-up" : "chevron-down"} size={18} />
               {detailsOpen ? "Hide details" : "Show details"}
             </summary>
-            <div className="focus__drawer">
-              <div className="focus__transcript" ref={bodyRef} aria-label="Reasoning">
-                {blocks.map((block, index) => (
-                  <section key={`${block.engine ?? "unattributed"}:${index}`} className="focus__block">
-                    <span className="panel-eyebrow focus__who">
-                      {ENGINES.find((e) => e.id === block.engine)?.label ?? "Agent"}
-                    </span>
-                    {/* PROSE FIRST, steps under it. The narration is the engine SAYING
-                        what it is about to do ("broke the goal into 8 steps: …") and the
-                        steps are the receipt for it — printing the receipt above the
-                        sentence that announces it reads backwards, and worse, it put the
-                        steps of one engine directly under the previous engine's prose.
-                        The caret still trails the prose, because that is what streams. */}
-                    {/* Prose and REDACTIONS are different things and now look it. A blob
-                        the model dumped mid-sentence used to be replaced by an
-                        angle-bracket marker left inline in the paragraph, listing the
-                        object's own field names — schema, in the middle of a sentence.
-                        The fact worth keeping is that context was gathered; it gets a
-                        row of its own and says so in words. */}
-                    {splitTranscriptText(block.text).map((part, partIndex, parts) =>
-                      part.kind === "context" ? (
-                        <p key={`ctx-${partIndex}`} className="focus__ctx">
-                          <i className="focus__ctx-mark" aria-hidden>
-                            ▤
-                          </i>
-                          {part.label}
-                        </p>
-                      ) : (
-                        <p key={`prose-${partIndex}`} className="focus__said">
-                          {part.text}
-                          {working &&
-                          index === blocks.length - 1 &&
-                          partIndex === parts.length - 1 &&
-                          block.engine === active ? (
-                            <span className="focus__caret" aria-hidden />
-                          ) : null}
-                        </p>
-                      ),
-                    )}
-                    {block.steps.length > 0 ? (
-                      <ol className="focus__steps">
-                        {block.steps.map((s) => (
-                          <li key={s.id} className={`focus__step focus__step--${s.tone}`}>
-                            <span className="focus__step-mark" aria-hidden>
-                              {s.tone === "notice" ? "!" : "✓"}
-                            </span>
-                            <span className="focus__step-body">
-                              <strong className="focus__step-label">{s.step}</strong>
-                              {s.detail ? <span className="focus__step-detail">{s.detail}</span> : null}
-                            </span>
-                          </li>
-                        ))}
-                      </ol>
-                    ) : null}
-                  </section>
-                ))}
-                {/* Silence is a fact about the engine, not a gap in the record — say so,
-                    or an engine that never narrates reads as a transcript that got cut. */}
-                {active !== null && !activeSpoke ? (
-                  <p className="focus__silent">
-                    <strong>{activeMeta?.label ?? "This engine"}</strong> ·{" "}
-                    {active === "planner"
-                      ? "composing in a single call — the model returns the finished plan rather than narrating its way there."
-                      : "working without narration; it reports a verdict rather than its reasoning."}
-                  </p>
-                ) : null}
-                {blocks.length === 0 && active === null ? (
-                  <span className="focus__empty">
-                    The agent's thinking will appear here as it works.
-                  </span>
-                ) : null}
-              </div>
-              <div className="focus__calls" aria-label="Capability calls">
-                <span className="panel-eyebrow">
-                  {chips.length > 0 ? `${chips.length} tool calls` : "No tool calls yet"}
-                </span>
-                {chips.slice(-12).map((chip) => (
-                  <span key={chip.id} className={`call call--${chip.state}`} title={chip.summary}>
-                    <span aria-hidden>{chip.state === "done" ? "✓ " : "… "}</span>
-                    {chip.module} · {chip.fn}
-                  </span>
-                ))}
-              </div>
-            </div>
+            {drawer}
           </details>
         </article>
       ) : null}

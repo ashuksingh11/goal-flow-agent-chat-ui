@@ -388,6 +388,10 @@
 /* --------------------------- frame 2 · the run --------------------------- */
 
 .run { display: flex; flex-direction: column; gap: 1.15rem; min-height: 0; }
+/* Two collapsed bars of the same weight sitting one above the other — pipeline, then
+   the reasoning. They are one group, so they sit closer together than the run's parts
+   did while it was running. */
+.run--compact { gap: 0.5rem; }
 
 .focus {
   background: var(--surface);
@@ -479,6 +483,9 @@
   animation: panel-land 200ms var(--p-ease-out) both;
 }
 .focus__empty { color: var(--ink-faint); }
+/* Read AFTER the run, the transcript is a document rather than a tail being watched, and
+   nothing above it is competing for the screen any more — so it gets more of it. */
+.run--compact .focus__transcript { max-height: 340px; }
 .focus__transcript {
   max-height: 220px;
   overflow-y: auto;
@@ -702,6 +709,9 @@
   font-weight: 700;
   font-style: normal;
 }
+/* The reasoning bar's mark is NOT a green tick: a tick is a verdict, and "here is what
+   it said" is not a thing that passed or failed. Same disc, neutral ink. */
+.pipe-collapsed__mark--quiet { background: var(--surface-2); color: var(--ink-quiet); }
 .pipe-collapsed__label { flex: 1; font-size: var(--fs-sub); font-weight: 500; color: var(--ink-dim); }
 /* The chevron TURNS rather than being swapped for a different character. Two glyphs
    cannot be tweened; one element can, and the rotation is the affordance telling you
