@@ -43,27 +43,6 @@ export interface ProposalListProps {
   onDecide: (decisions: ApprovalDecision[]) => void;
 }
 
-function summarizeArgs(args: Record<string, unknown>): string {
-  const entries = Object.entries(args);
-  if (entries.length === 0) return "";
-  return entries
-    .slice(0, 3)
-    .map(([key, value]) => {
-      const rendered =
-        typeof value === "string"
-          ? value
-          : Array.isArray(value)
-            ? `${value.length} item${value.length === 1 ? "" : "s"}`
-            : value === null
-              ? "null"
-              : typeof value === "object"
-                ? "object"
-                : String(value);
-      return `${key}: ${rendered}`;
-    })
-    .join(" · ");
-}
-
 export function ProposalList({ proposals, statuses, onDecide }: ProposalListProps) {
   // Exactly App.tsx's filter — these are the proposals that must appear in `decisions[]`.
   const required = useMemo(
@@ -158,12 +137,11 @@ export function ProposalList({ proposals, statuses, onDecide }: ProposalListProp
                     ? `Not included — ${proposal.reason}`
                     : proposal.reason}
               </span>
-              {firm ? (
-                <code className="approval__call">
-                  {proposal.module}.{proposal.function}
-                  {summarizeArgs(proposal.args) ? ` · ${summarizeArgs(proposal.args)}` : ""}
-                </code>
-              ) : null}
+              {/* v9: the `ShoppingList.PlaceOrder · estimatedTotal: 58.2` line is gone.
+                  The board dropped the same thing in v7 for the same reason — it names
+                  the API being called, which is a fact about our implementation, and the
+                  arg dump beside it is a serialiser talking. What the person is deciding
+                  is stated above it in their own words, and the money is in the reason. */}
             </div>
 
             {firm && !committed ? (

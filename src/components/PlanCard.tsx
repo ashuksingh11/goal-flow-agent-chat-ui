@@ -257,12 +257,13 @@ export function PlanCard({
           display-only; absent is normal and the block simply does not render. */}
       {payload.considered || (payload.rejected && payload.rejected.length > 0) ? (
         <section className="weighed" aria-label="What it considered">
+          {/* v9 — NO COUNTS. "10 options considered · 5 rejected" spent the line on two
+              numbers nobody can check, in front of the four rejections that are the
+              actual evidence. What the reader wants from this block is WHAT was thrown
+              away and WHY; the arithmetic of it says nothing they can use. */}
           <p className="weighed__head">
             <Icon name="lightbulb" size={15} className="weighed__mark" />
-            {payload.considered ? `${payload.considered} options considered` : "Options considered"}
-            {payload.rejected && payload.rejected.length > 0
-              ? ` · ${payload.rejected.length} rejected`
-              : ""}
+            Also considered
           </p>
           {payload.rejected && payload.rejected.length > 0 ? (
             <ul className="weighed__list">

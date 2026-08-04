@@ -976,7 +976,8 @@
 .approval__action { font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
 .approval__reason { font-size: 0.8rem; color: var(--ink-faint); }
 .approval--firm .approval__reason { color: var(--warn); font-weight: 500; }
-.approval__call { font-size: 0.7rem; color: var(--ink-faint); overflow-wrap: anywhere; }
+/* v9: .approval__call is gone — it styled `Module.Function · arg: value`, which is our
+   implementation talking on a screen where someone is deciding about their money. */
 
 .approval__switch {
   flex: 0 0 auto;
