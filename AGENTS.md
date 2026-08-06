@@ -55,6 +55,19 @@ approval). `src/types/contract.ts` MIRRORS the cloud's `CONTRACT.md`. System des
   unbound and more than one device agent is online (`ashu@boxA` / `bob@boxB`);
   remembered per browser after the first pick. `?device=` skips it entirely
   (scripted/CI override).
+- `src/lib/speech.ts` — **v11, the voice.** The cloud sends a `speech` frame beside the
+  understanding gate; this plays it. **READ THIS FILE BEFORE TOUCHING AUDIO ANYWHERE.**
+  A browser rejects `audio.play()` with `NotAllowedError` without user activation, and
+  the create phase gives us no gesture — the webview is mounted by the cloud while the
+  user is looking at Bixby, and the card arrives ~11s later untouched. Two independent
+  gates: **Permissions Policy** (iframes only — the Bixby surrogate sets
+  `allow="autoplay"`, and a real Hub's WebView we cannot set anything on) and **user
+  activation** (a native-app setting we do not own; the default differs per platform).
+  So this NEVER assumes it may speak: it tries, reports `playing | blocked | unavailable`,
+  and the card renders a "Hear this" tap for `blocked`. `primeOnFirstGesture()` spends
+  any stray tap on unlocking audio so that button is rarely seen. One reused
+  `HTMLAudioElement` — two would let utterances overlap, and two voices on a fridge is
+  worse than none.
 - `src/components/`:
   - `UnderstandingCard.tsx` — the **confirm-understanding gate**: renders the cloud's
     read (objective / constraints / thought) with "Confirm & plan" / "Decline" before the

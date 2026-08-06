@@ -58,7 +58,10 @@ export type IconName =
   // `cart` and `bell` are the other two things a plan row ever turns out to be.
   | "plane"
   | "cart"
-  | "bell";
+  | "bell"
+  // v11: the voice. `speaker` marks a card that spoke; it is also the tap target when
+  // the browser refused to autoplay (see lib/speech.ts).
+  | "speaker";
 
 /** Each entry is a list of `d` attributes stroked in order. No fills — one visual weight. */
 const PATHS: Record<IconName, string[]> = {
@@ -126,6 +129,9 @@ const PATHS: Record<IconName, string[]> = {
     "M17.2 20a1.1 1.1 0 1 0 0-2.2 1.1 1.1 0 0 0 0 2.2z",
   ],
   bell: ["M6.5 16V10.5a5.5 5.5 0 0 1 11 0V16l1.5 2.5h-14z", "M10 21h4"],
+  // A cone and two waves. The waves are what make it read as SOUND rather than as a
+  // mute icon at a glance across a kitchen.
+  speaker: ["M4 9.5h3.5L12 5.5v13L7.5 14.5H4z", "M15.5 9.5a4 4 0 0 1 0 5", "M18 7a7.5 7.5 0 0 1 0 10"],
 };
 
 export interface IconProps {

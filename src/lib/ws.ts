@@ -35,6 +35,9 @@ const INBOUND_TYPES = new Set([
   "capabilities",
   "agent_event",
   "understanding",
+  // v11: the voice. Absent from this list the frame is dropped in silence, which for a
+  // feature whose failure mode IS silence would be undebuggable.
+  "speech",
   "present_plan",
   "proposal",
   "status",
@@ -101,6 +104,17 @@ function getConfiguredUrl() {
     return `${proto}://${window.location.hostname}:${port}/ws`;
   }
   return FALLBACK_WS_URL;
+}
+
+/**
+ * Where the hub is, as a URL — the resolution above, exposed.
+ *
+ * v11: `lib/speech.ts` needs the hub's HTTP origin to fetch audio, and this is the only
+ * place that knows it. Deriving it a second time there would be two rules for one fact,
+ * and the one that drifts would be the one nobody is watching.
+ */
+export function getSocketUrl(): string {
+  return sharedUrl ?? getConfiguredUrl();
 }
 
 /**

@@ -46,6 +46,8 @@ import { DevicePicker } from "./components/DevicePicker";
 import { CountdownRing } from "./components/CountdownRing";
 import { Icon } from "./components/Icon";
 import { createGoalFlowSocket, getDeviceId, getGoalId, getRememberedDeviceId, rememberDeviceId } from "./lib/ws";
+import { play as playSpeech, primeOnFirstGesture, stop as stopSpeech } from "./lib/speech";
+import type { PlaybackOutcome } from "./lib/speech";
 import type { ConnectionState, GoalFlowSocket } from "./lib/ws";
 import type {
   AgentEvent,
@@ -55,6 +57,7 @@ import type {
   DeviceInfo,
   PresentPlan,
   Proposal,
+  Speech,
   Status,
   Understanding,
   UiInboundMessage,
@@ -96,6 +99,15 @@ interface UiState {
   working: boolean;
   /** Pre-planning confirmation gate from the cloud. */
   understanding: Understanding | null;
+  /**
+   * v11: what the cloud wants said out loud about the gate above, or null.
+   *
+   * NULL IS THE NORMAL CASE, not an error state — a cloud with no TTS key never sends
+   * the frame, and every screen here is complete and answerable in silence. Cleared
+   * wherever `understanding` is cleared: a voice outliving its card would be describing
+   * something that is no longer on screen.
+   */
+  speech: Speech | null;
   /**
    * The goal in words, for the goal bar — WHAT THE USER SAID, not what the agent made
    * of it. This surface never SENDS `user_goal` (v4.1 — Bixby owns goal entry), so the
@@ -204,6 +216,7 @@ const INITIAL_STATE: UiState = {
   phase: null,
   working: false,
   understanding: null,
+  speech: null,
   goalText: "",
   declinedGoalId: null,
   modules: null,
@@ -495,6 +508,7 @@ function closeCreatePhase(state: UiState): UiState {
     ...state,
         activeGoalId: null,
         understanding: null,
+        speech: null,
         goalText: "",
         phase: null,
         working: false,
@@ -606,6 +620,14 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         phase: maxRailPhase(withGoal.phase, "confirming"),
       };
 
+    case "speech":
+      // v11. Arrives immediately after the `understanding` it speaks for, so by here
+      // the card is already in state and the effect below can play against a gate the
+      // user can see. Stored rather than played from the reducer because the reducer is
+      // PURE — audio is an effect, and putting it here would make replaying state
+      // impossible to reason about.
+      return { ...withGoal, speech: message };
+
     case "notice":
       // v7: NOT every notice is terminal. "updating_goals" arrives mid-save, while the
       // saving screen is deliberately still up, and says what the cloud is doing to the
@@ -631,6 +653,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         declinedClosesIn: message.closes_in_s ?? null,
         declinedGoalId: message.goal_id,
         understanding: null,
+        speech: null,
         goalText: "",
         phase: null,
         working: false,
@@ -674,6 +697,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         declined: null,
         declinedClosesIn: null,
         understanding: null,
+        speech: null,
         // v7.4: the open now carries what the user SAID, and it arrives ~10-60s before
         // the understanding does. Without it the bar reads "Waiting for a goal…" for the
         // whole interpretation — while the goal it is waiting for is the one being read.
@@ -717,6 +741,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
       return {
         ...withGoal,
         understanding: null,
+        speech: null,
         plan: message,
         pristinePlan: message,
         working: false,
@@ -906,6 +931,7 @@ function reducer(state: UiState, action: UiAction): UiState {
         return {
           ...state,
           understanding: null,
+          speech: null,
           activeGoalId: action.goalId,
           phase: maxRailPhase(state.phase, "planning"),
           working: true,
@@ -920,6 +946,7 @@ function reducer(state: UiState, action: UiAction): UiState {
         ],
         activeGoalId: null,
         understanding: null,
+        speech: null,
         goalText: "",
         declinedGoalId: action.goalId,
         phase: null,
@@ -1114,6 +1141,46 @@ export default function App() {
    * ring FREEZES on pointer-down, because a ring that keeps draining while the close is
    * already underway is promising seconds that no longer exist.
    */
+  /*
+   * v11 — the voice, and the fact that we may not be allowed to use it.
+   *
+   * `speechState` is what the CARD renders, and the states are not decorative:
+   *   "idle"        — nothing to say (the usual case: a cloud with no TTS key)
+   *   "playing"     — it spoke, or is speaking. Show that it did.
+   *   "blocked"     — the browser refused for want of a user gesture. OFFER THE TAP:
+   *                   this is a working voice waiting for permission, and the ONE
+   *                   state that must be visible, because only the user can resolve it.
+   *   "unavailable" — the audio itself failed. Stay quiet; the card is complete.
+   *
+   * See lib/speech.ts for why "blocked" is a normal outcome on a Hub webview rather
+   * than an error we could engineer away.
+   */
+  const [speechState, setSpeechState] = useState<"idle" | PlaybackOutcome>("idle");
+
+  // Spend the first gesture this document gets — whatever it was for — on unlocking
+  // audio. A user who taps anything at all then never meets the fallback button.
+  useEffect(() => primeOnFirstGesture(), []);
+
+  useEffect(() => {
+    const utterance = state.speech?.payload;
+    if (!utterance) {
+      setSpeechState("idle");
+      return;
+    }
+    let live = true;
+    void playSpeech(utterance).then((outcome) => {
+      // A gate answered while the audio was still being fetched: the card is gone and
+      // the sentence is about a question that has already been settled.
+      if (live) setSpeechState(outcome);
+    });
+    return () => {
+      live = false;
+      // Leaving the gate stops the voice. Nothing on this surface should be heard
+      // describing a screen the user has moved past.
+      stopSpeech();
+    };
+  }, [state.speech]);
+
   const [closingRefusal, setClosingRefusal] = useState(false);
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [runEndedAt, setRunEndedAt] = useState<number | null>(null);
@@ -1428,6 +1495,14 @@ export default function App() {
                 captureOnly={state.understanding.payload.capture_only}
                 onConfirm={(acceptedIds) => sendUnderstanding(true, acceptedIds)}
                 onDecline={() => sendUnderstanding(false)}
+                speech={speechState}
+                onPlaySpeech={() => {
+                  // Inside a real click, which is the entire point: this call carries
+                  // the user activation the autoplay attempt lacked, and it unlocks
+                  // every later utterance in this document too.
+                  const utterance = state.speech?.payload;
+                  if (utterance) void playSpeech(utterance).then(setSpeechState);
+                }}
               />
             ) : null}
 
