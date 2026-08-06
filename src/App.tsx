@@ -298,7 +298,16 @@ type UiAction =
  * end, 2.2 s ended abruptly: the eye reaches the sentence about the Family Hub taking over
  * roughly when the screen goes.
  */
-const MIN_SAVING_MS = 3800;
+/*
+ * v11.2: 3800 -> 5200, tracking the cloud's 4.5s and leaving room for the voice.
+ *
+ * The saving screen now speaks, and it was closing mid-sentence. Measured on the `saved`
+ * cue in the demo voice: the first chunk is ready 1.4s after the approval and the whole
+ * line runs 3.2s, so the voice finishes at ~4.6s while this floor let the surface go at
+ * 3.8s. It stays ABOVE the cloud's dwell for the reason it always has — the cloud closes
+ * the bracket and this side must already be willing to hold, or the two race.
+ */
+const MIN_SAVING_MS = 5200;
 
 const MAX_TICKS = 40;
 
@@ -1555,12 +1564,6 @@ export default function App() {
                 captureOnly={state.understanding.payload.capture_only}
                 onConfirm={(acceptedIds) => sendUnderstanding(true, acceptedIds)}
                 onDecline={() => sendUnderstanding(false)}
-                // v11.1: only when the voice is talking about THIS card. The plan
-                // summary and its approvals line also arrive as `speech`, and a confirm
-                // gate offering to replay a sentence about the plan would be offering
-                // the wrong thing entirely.
-                speech={speechCue === "understanding" ? speechState : "idle"}
-                onPlaySpeech={() => speechQueueRef.current?.retry()}
               />
             ) : null}
 

@@ -66,18 +66,6 @@ export interface UnderstandingCardProps {
   onConfirm: (acceptedConstraintIds: string[]) => void;
   onDecline: () => void;
   resolved?: "confirmed" | "declined";
-  /**
-   * v11 — the state of the spoken version of this card.
-   *
-   * Only ONE of these states puts anything in front of the user: "blocked", where the
-   * browser has refused to autoplay for want of a gesture and the tap is the only thing
-   * that can resolve it. "playing" gets a quiet marker; "idle" (no key on the cloud) and
-   * "unavailable" (synthesis failed) render nothing at all, because this card has always
-   * been complete in silence and a broken-speaker icon would only report our plumbing.
-   */
-  speech?: "idle" | "playing" | "blocked" | "unavailable";
-  /** Play the utterance, from inside a real click — the gesture is the whole point. */
-  onPlaySpeech?: () => void;
 }
 
 /** How a proposed rule's value reads on a chip: ["no_dairy"] → "no dairy". */
@@ -165,8 +153,6 @@ export function UnderstandingCard({
   onConfirm,
   onDecline,
   resolved,
-  speech = "idle",
-  onPlaySpeech,
 }: UnderstandingCardProps) {
   // The authored label per store kind, joined when a kind unions several entries — two
   // allergen entries are "peanut allergy, shellfish allergy", not "peanuts, shellfish".
@@ -213,24 +199,18 @@ export function UnderstandingCard({
             one fact in it that appeared nowhere else was the window, in ISO. */}
         {covers && !captureOnly ? <p className="confirm-card__covers">{covers}</p> : null}
 
-        {/* v11 — the voice, and ONLY when there is something for the user to do about
-            it. "blocked" is a real button because a browser will not autoplay without a
-            gesture and nothing but a tap can fix that; "playing" is a marker, not a
-            control, because a card that is already speaking needs no affordance. The
-            other two states render nothing: this card has always been complete in
-            silence, and an error icon for a failed voice-over would be reporting our
-            plumbing to someone who never asked for audio. */}
-        {speech === "blocked" && !resolved ? (
-          <button type="button" className="speak-chip" onClick={onPlaySpeech}>
-            <Icon name="speaker" size={18} />
-            Hear this
-          </button>
-        ) : null}
-        {speech === "playing" ? (
-          <span className="speak-mark" aria-hidden="true">
-            <Icon name="speaker" size={16} />
-          </span>
-        ) : null}
+        {/* v11.2 — NO AUDIO AFFORDANCE ON THIS CARD, deliberately.
+
+            v11 put a "Hear this" chip here for a browser that refuses to autoplay. It is
+            gone because this is the DECISION screen: the card's whole job is to collect a
+            confirm or a decline, and a third control competes with the two that matter.
+            The voice is a courtesy here, not the content — everything it says is written
+            on the card the reader is already looking at.
+
+            The affordance survives where it earns its place: PlanCard, whose utterance
+            carries the one thing the screen cannot say as quickly, which is what this
+            week actually IS. `speech`/`onPlaySpeech` stay in the props so App keeps one
+            wiring path and bringing it back needs no plumbing. */}
       </header>
 
       {chips.length > 0 ? (
