@@ -39,6 +39,16 @@ type PlanMorph = { prevTitle: string; prevDetail?: string };
 
 export interface PlanCardProps {
   plan: PresentPlan;
+  /**
+   * v11.1: the state of the voice, when it is speaking about THIS card.
+   *
+   * Only "blocked" renders anything — the tap that a browser's autoplay refusal makes
+   * necessary. See UnderstandingCard for the same treatment and lib/speech.ts for why
+   * a refusal is ordinary rather than exceptional.
+   */
+  speech?: "idle" | "playing" | "blocked" | "unavailable";
+  /** Play the pending utterance from inside a real click. */
+  onPlaySpeech?: () => void;
   /** Ids changed by the most recent approved daily adaptation — highlighted. */
   changedIds?: string[];
   /** Previous row copy captured before the adapted plan replaced it. */
@@ -146,6 +156,8 @@ export function PlanCard({
   composedMs = null,
   proposalStatuses,
   onDecide,
+  speech = "idle",
+  onPlaySpeech,
 }: PlanCardProps) {
   const { payload } = plan;
   const changed = useMemo(() => new Set(changedIds), [changedIds]);
@@ -199,6 +211,16 @@ export function PlanCard({
             {composedMs !== null ? ` · ${composedIn(composedMs)}` : ""}
           </p>
         </div>
+        {/* v11.1 — the same affordance the confirm gate has, for the same reason: the
+            browser may have refused to autoplay and only a tap can undo that. The plan
+            is the one utterance carrying something the screen cannot say as quickly —
+            what this week actually IS — so it is worth offering twice. */}
+        {speech === "blocked" ? (
+          <button type="button" className="speak-chip" onClick={onPlaySpeech}>
+            <Icon name="speaker" size={18} />
+            Hear this
+          </button>
+        ) : null}
         {payload.explanation ? (
           <details className="result__why">
             <summary className="result__why-summary">

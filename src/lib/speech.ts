@@ -159,6 +159,36 @@ export async function play(payload: SpeechPayload): Promise<PlaybackOutcome> {
   ]);
 }
 
+/**
+ * Resolve when the current utterance FINISHES — or immediately, if nothing is speaking.
+ *
+ * `play()` deliberately resolves as soon as playback has STARTED, because the caller
+ * needs to know about a refusal within a beat, not in eight seconds. But a queue needs
+ * the other event entirely: without this it would start the next utterance ~150ms into
+ * the current one, which is the exact "two voices at once" that having a queue was
+ * supposed to prevent.
+ *
+ * Resolves rather than rejects on `error`: an utterance that dies mid-sentence is still
+ * over, and the queue's job is to move on.
+ */
+export function whenEnded(): Promise<void> {
+  const el = element;
+  if (el === null || el.paused || el.ended) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      el.removeEventListener("ended", done);
+      el.removeEventListener("error", done);
+      el.removeEventListener("pause", done);
+      resolve();
+    };
+    el.addEventListener("ended", done);
+    el.addEventListener("error", done);
+    // `pause` covers stop() — a superseded utterance must not hold the queue open for
+    // the remaining seconds of audio nobody is going to hear.
+    el.addEventListener("pause", done);
+  });
+}
+
 /** Stop whatever is speaking. Called when the gate is answered — see App.tsx. */
 export function stop(): void {
   if (element === null) return;

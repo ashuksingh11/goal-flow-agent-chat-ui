@@ -20,6 +20,10 @@ import { formatWhen } from "../lib/date";
 import { PlanCard } from "./PlanCard";
 
 export interface PlanColumnProps {
+  /** v11.1: voice state, when the voice is speaking about the plan. Passed to PlanCard. */
+  speech?: "idle" | "playing" | "blocked" | "unavailable";
+  /** v11.1: replay the pending utterance, from inside a real click. */
+  onPlaySpeech?: () => void;
   /** Rows revealed so far (paced out of the reveal queue). */
   drafts: DraftPlanItem[];
   /** `plan_progress.total` if the device announced one (v5.1); null on older devices. */
@@ -38,6 +42,8 @@ export interface PlanColumnProps {
 }
 
 export function PlanColumn({
+  speech = "idle",
+  onPlaySpeech,
   drafts,
   announcedTotal,
   forming,
@@ -69,6 +75,8 @@ export function PlanColumn({
           composedMs={composedMs}
           proposalStatuses={proposalStatuses}
           onDecide={onDecide}
+          speech={speech}
+          onPlaySpeech={onPlaySpeech}
         />
       </section>
     );

@@ -46,8 +46,9 @@ import { DevicePicker } from "./components/DevicePicker";
 import { CountdownRing } from "./components/CountdownRing";
 import { Icon } from "./components/Icon";
 import { createGoalFlowSocket, getDeviceId, getGoalId, getRememberedDeviceId, rememberDeviceId } from "./lib/ws";
-import { play as playSpeech, primeOnFirstGesture, stop as stopSpeech } from "./lib/speech";
+import { primeOnFirstGesture } from "./lib/speech";
 import type { PlaybackOutcome } from "./lib/speech";
+import { SpeechQueue } from "./lib/speechQueue";
 import type { ConnectionState, GoalFlowSocket } from "./lib/ws";
 import type {
   AgentEvent,
@@ -100,14 +101,22 @@ interface UiState {
   /** Pre-planning confirmation gate from the cloud. */
   understanding: Understanding | null;
   /**
-   * v11: what the cloud wants said out loud about the gate above, or null.
+   * v11: what the cloud wants said out loud, APPEND-ONLY.
    *
-   * NULL IS THE NORMAL CASE, not an error state — a cloud with no TTS key never sends
-   * the frame, and every screen here is complete and answerable in silence. Cleared
-   * wherever `understanding` is cleared: a voice outliving its card would be describing
-   * something that is no longer on screen.
+   * EMPTY IS THE NORMAL CASE, not an error state — a cloud with no TTS key never sends
+   * a frame at all, and every screen here is complete and answerable in silence.
+   *
+   * v11.1 — AND IT IS A LIST BECAUSE A SINGLE SLOT SILENTLY LOST UTTERANCES. The cloud
+   * emits `plan` and `approvals` back-to-back on one screen; React batches both into a
+   * single re-render, so an effect keyed on a `Speech | null` only ever observed the
+   * SECOND one and the plan summary was never spoken. It reproduced on every live run
+   * and on none of the headless ones, because the headless client has no reducer.
+   *
+   * Appending keeps the reducer's create-phase filtering (stale goal ids, declined
+   * goals) while making "two frames in one tick" representable. Cleared wherever the
+   * gate is cleared — a voice outliving its screen describes something not there.
    */
-  speech: Speech | null;
+  speech: Speech[];
   /**
    * The goal in words, for the goal bar — WHAT THE USER SAID, not what the agent made
    * of it. This surface never SENDS `user_goal` (v4.1 — Bixby owns goal entry), so the
@@ -216,7 +225,7 @@ const INITIAL_STATE: UiState = {
   phase: null,
   working: false,
   understanding: null,
-  speech: null,
+  speech: [],
   goalText: "",
   declinedGoalId: null,
   modules: null,
@@ -508,7 +517,7 @@ function closeCreatePhase(state: UiState): UiState {
     ...state,
         activeGoalId: null,
         understanding: null,
-        speech: null,
+        speech: [],
         goalText: "",
         phase: null,
         working: false,
@@ -626,7 +635,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
       // user can see. Stored rather than played from the reducer because the reducer is
       // PURE — audio is an effect, and putting it here would make replaying state
       // impossible to reason about.
-      return { ...withGoal, speech: message };
+      return { ...withGoal, speech: [...withGoal.speech, message] };
 
     case "notice":
       // v7: NOT every notice is terminal. "updating_goals" arrives mid-save, while the
@@ -653,7 +662,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         declinedClosesIn: message.closes_in_s ?? null,
         declinedGoalId: message.goal_id,
         understanding: null,
-        speech: null,
+        speech: [],
         goalText: "",
         phase: null,
         working: false,
@@ -697,7 +706,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         declined: null,
         declinedClosesIn: null,
         understanding: null,
-        speech: null,
+        speech: [],
         // v7.4: the open now carries what the user SAID, and it arrives ~10-60s before
         // the understanding does. Without it the bar reads "Waiting for a goal…" for the
         // whole interpretation — while the goal it is waiting for is the one being read.
@@ -741,7 +750,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
       return {
         ...withGoal,
         understanding: null,
-        speech: null,
+        speech: [],
         plan: message,
         pristinePlan: message,
         working: false,
@@ -931,7 +940,7 @@ function reducer(state: UiState, action: UiAction): UiState {
         return {
           ...state,
           understanding: null,
-          speech: null,
+          speech: [],
           activeGoalId: action.goalId,
           phase: maxRailPhase(state.phase, "planning"),
           working: true,
@@ -946,7 +955,7 @@ function reducer(state: UiState, action: UiAction): UiState {
         ],
         activeGoalId: null,
         understanding: null,
-        speech: null,
+        speech: [],
         goalText: "",
         declinedGoalId: action.goalId,
         phase: null,
@@ -1156,30 +1165,81 @@ export default function App() {
    * than an error we could engineer away.
    */
   const [speechState, setSpeechState] = useState<"idle" | PlaybackOutcome>("idle");
+  /**
+   * v11.1 — WHAT is speaking, not just whether. With five cues the card can no longer
+   * assume an utterance is about itself: the plan summary and the approvals line both
+   * land while PlanCard is up, and the understanding chip must not offer to replay a
+   * sentence about the plan.
+   */
+  const [speechCue, setSpeechCue] = useState<string | null>(null);
 
   // Spend the first gesture this document gets — whatever it was for — on unlocking
   // audio. A user who taps anything at all then never meets the fallback button.
   useEffect(() => primeOnFirstGesture(), []);
 
-  useEffect(() => {
-    const utterance = state.speech?.payload;
-    if (!utterance) {
-      setSpeechState("idle");
-      return;
-    }
-    let live = true;
-    void playSpeech(utterance).then((outcome) => {
-      // A gate answered while the audio was still being fetched: the card is gone and
-      // the sentence is about a question that has already been settled.
-      if (live) setSpeechState(outcome);
+  /**
+   * ONE QUEUE for the surface's lifetime. Built in a ref rather than per-render because
+   * it holds the pending utterances and the generation counter — a queue rebuilt on
+   * render would forget what it was saying mid-sentence.
+   */
+  const speechQueueRef = useRef<SpeechQueue | null>(null);
+  if (speechQueueRef.current === null) {
+    speechQueueRef.current = new SpeechQueue({
+      onOutcome: (outcome, payload) => {
+        setSpeechState(outcome);
+        setSpeechCue(payload?.cue ?? null);
+      },
     });
-    return () => {
-      live = false;
-      // Leaving the gate stops the voice. Nothing on this surface should be heard
-      // describing a screen the user has moved past.
-      stopSpeech();
-    };
+  }
+
+  /**
+   * Every inbound utterance is OFFERED to the queue, which decides whether it plays now,
+   * waits, cuts something off, or is dropped. The policy lives in lib/speechQueue.ts,
+   * deliberately, and not in a component.
+   *
+   * DRAINS A LIST rather than reacting to one value, and the cursor is the reason: React
+   * batches, so `plan` and `approvals` — emitted back-to-back by the cloud — arrive in a
+   * single render. An effect that read one slot saw only the second and the plan summary
+   * was never spoken at all. Reproduced on every live run; invisible to every headless
+   * test, because a headless client has no reducer to batch.
+   */
+  const spokenCursor = useRef(0);
+  useEffect(() => {
+    if (state.speech.length < spokenCursor.current) spokenCursor.current = 0; // reset
+    for (const frame of state.speech.slice(spokenCursor.current)) {
+      speechQueueRef.current?.push(frame.payload);
+    }
+    spokenCursor.current = state.speech.length;
   }, [state.speech]);
+
+  // The goal changed, or the surface reset: abandon everything queued. Those utterances
+  // were about a moment that has passed, and the create-phase bracket is exactly the
+  // boundary they must not cross.
+  useEffect(() => {
+    return () => speechQueueRef.current?.clear();
+  }, [state.activeGoalId]);
+
+  /**
+   * BARGE-IN (rule 5). Any tap anywhere on this surface stops the voice.
+   *
+   * Someone who is acting does not need to be talked at, and a fridge that keeps
+   * narrating over a person's decision is not assisting them — it is competing. Bound
+   * once at the document, capture phase, so it fires before any component's own handler
+   * and no button has to remember to do this.
+   */
+  useEffect(() => {
+    const hush = (event: PointerEvent) => {
+      // EXCEPT the control that exists to start the voice. This listener is on capture,
+      // so it runs BEFORE the chip's own click handler — without this guard, tapping
+      // "Hear this" would clear the queue and then ask it to replay an empty queue,
+      // and the one button whose entire job is to make audio happen would be the one
+      // button that silently does nothing.
+      if ((event.target as Element | null)?.closest?.(".speak-chip")) return;
+      speechQueueRef.current?.clear();
+    };
+    window.addEventListener("pointerdown", hush, true);
+    return () => window.removeEventListener("pointerdown", hush, true);
+  }, []);
 
   const [closingRefusal, setClosingRefusal] = useState(false);
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
@@ -1495,14 +1555,12 @@ export default function App() {
                 captureOnly={state.understanding.payload.capture_only}
                 onConfirm={(acceptedIds) => sendUnderstanding(true, acceptedIds)}
                 onDecline={() => sendUnderstanding(false)}
-                speech={speechState}
-                onPlaySpeech={() => {
-                  // Inside a real click, which is the entire point: this call carries
-                  // the user activation the autoplay attempt lacked, and it unlocks
-                  // every later utterance in this document too.
-                  const utterance = state.speech?.payload;
-                  if (utterance) void playSpeech(utterance).then(setSpeechState);
-                }}
+                // v11.1: only when the voice is talking about THIS card. The plan
+                // summary and its approvals line also arrive as `speech`, and a confirm
+                // gate offering to replay a sentence about the plan would be offering
+                // the wrong thing entirely.
+                speech={speechCue === "understanding" ? speechState : "idle"}
+                onPlaySpeech={() => speechQueueRef.current?.retry()}
               />
             ) : null}
 
@@ -1528,6 +1586,10 @@ export default function App() {
                 composedMs={
                   runStartedAt !== null && runEndedAt !== null ? runEndedAt - runStartedAt : null
                 }
+                // v11.1: the plan and its approvals both speak on this screen, so the
+                // chip belongs here too when either is blocked.
+                speech={speechCue === "plan" || speechCue === "approvals" ? speechState : "idle"}
+                onPlaySpeech={() => speechQueueRef.current?.retry()}
                 proposalStatuses={state.proposalStatuses}
                 onDecide={(decisions) =>
                   sendDecisions(state.plan!.goal_id, state.plan!.correlation_id, decisions)
