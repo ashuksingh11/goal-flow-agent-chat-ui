@@ -1503,7 +1503,7 @@ export default function App() {
           <span className="handoff__mark" aria-hidden="true">✓</span>
           <div className="handoff__body">
             <strong>Plan approved.</strong>{" "}
-            Your Agent Board is now driving this goal — it tracks progress, simulates
+            Your AI Board is now driving this goal — it tracks progress, simulates
             world events, and will ask you there if anything needs to change.
           </div>
         </div>
