@@ -22,7 +22,7 @@
  *
  * Component tree:
  *   App
- *   ├── GoalBar           — the goal, the run clock, engines-cleared hairline
+ *   ├── GoalBar           — what the user asked for, in their own words
  *   ├── column
  *   │   ├── WorkingColumn — receipts / focus card (transcript + calls) / ghosts
  *   │   ├── PlanColumn    — the plan forming, then PlanCard + ProposalList
@@ -43,6 +43,8 @@ import { StatusTimeline } from "./components/StatusTimeline";
 import { WorkingColumn } from "./components/WorkingColumn";
 import { UnderstandingCard } from "./components/UnderstandingCard";
 import { DevicePicker } from "./components/DevicePicker";
+import { CountdownRing } from "./components/CountdownRing";
+import { Icon } from "./components/Icon";
 import { createGoalFlowSocket, getDeviceId, getGoalId, getRememberedDeviceId, rememberDeviceId } from "./lib/ws";
 import type { ConnectionState, GoalFlowSocket } from "./lib/ws";
 import type {
@@ -59,7 +61,6 @@ import type {
   UiOutboundMessage,
 } from "./types/contract";
 import {
-  HARNESS_PIPELINE,
   INITIAL_DEMO_CLOCK,
   INITIAL_HARNESS,
   PLAN_ITEM_STEP_MS,
@@ -96,10 +97,15 @@ interface UiState {
   /** Pre-planning confirmation gate from the cloud. */
   understanding: Understanding | null;
   /**
-   * The goal in words, for the goal bar. This surface never SENDS `user_goal` (v4.1 —
-   * Bixby owns goal entry), so the only place the goal text reaches us is the cloud's
-   * `understanding.objective`. Kept in state because the understanding frame itself is
-   * cleared the moment the gate is answered.
+   * The goal in words, for the goal bar — WHAT THE USER SAID, not what the agent made
+   * of it. This surface never SENDS `user_goal` (v4.1 — Bixby owns goal entry), so the
+   * words arrive on `chat_ui_open.goal_text` (v7.4). Kept in state because the frames
+   * that carry it are cleared the moment the gate is answered.
+   *
+   * v9: `understanding` no longer overwrites this with `payload.objective`. The bar is
+   * the request and the confirm card's heading is the agent's restatement of it — two
+   * different things, and seeing them differ is the entire point of a confirm gate.
+   * The objective is only a fallback, for a surface rehydrated without the open frame.
    */
   goalText: string;
   /** Locally declined goal; late frames for it are ignored. */
@@ -167,6 +173,12 @@ interface UiState {
    * bracket a few seconds later, so there is no dismiss button: nothing here needs doing.
    */
   declined: string | null;
+  /**
+   * v9: seconds the refusal card has before the cloud closes the webview, straight off
+   * the notice frame. Null when the cloud scheduled no close — and then the card shows
+   * no countdown at all rather than inventing a deadline it cannot know.
+   */
+  declinedClosesIn: number | null;
   /** Sustain ticks for StatusTimeline (capped). */
   ticks: Status[];
   demoClock: DemoClock;
@@ -216,6 +228,7 @@ const INITIAL_STATE: UiState = {
   saving: null,
   pendingClose: null,
   declined: null,
+  declinedClosesIn: null,
   ticks: [],
   demoClock: INITIAL_DEMO_CLOCK,
   transcript: [],
@@ -256,8 +269,14 @@ type UiAction =
  * 2200 because the cloud's own floor is 1.6 s (SAVE_DWELL_S) — at 1400 this one never
  * bound. With the run itself now ~11 s, a second and a half of hand-off reads as a
  * flicker rather than a transition.
+ *
+ * v9: 3800, tracking the cloud's 3.0 s. It stays ABOVE the cloud's floor on purpose — the
+ * cloud closes the bracket and this side has to already be willing to hold, or the two
+ * floors race and the screen ends on whichever timer happens to be shorter. Watched end to
+ * end, 2.2 s ended abruptly: the eye reaches the sentence about the Family Hub taking over
+ * roughly when the screen goes.
  */
-const MIN_SAVING_MS = 2200;
+const MIN_SAVING_MS = 3800;
 
 const MAX_TICKS = 40;
 
@@ -502,6 +521,7 @@ function closeCreatePhase(state: UiState): UiState {
     saving: null,
     pendingClose: null,
     declined: null,
+  declinedClosesIn: null,
   };
 }
 
@@ -564,7 +584,24 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
       return {
         ...withGoal,
         understanding: message,
-        goalText: message.payload.objective || withGoal.goalText,
+        /*
+         * v9 — KEEP THE USER'S OWN WORDS. This used to be
+         * `message.payload.objective || withGoal.goalText`, which overwrote what the
+         * user actually said with the cloud's restatement of it. Both then rendered:
+         * the goal bar showed the objective and the confirm card's heading showed the
+         * same objective again, one directly above the other.
+         *
+         * v7.4 had already fixed the supply side — `chat_ui_open` carries `goal_text`,
+         * the words Bixby heard — so the spoken sentence was in state and was being
+         * thrown away a moment later. The duplication was survivable while an eyebrow
+         * sat between the two; with that gone it reads as a stutter.
+         *
+         * The two are DIFFERENT THINGS and each belongs where it is: the bar is what
+         * you asked for, the heading is what the agent understood. Seeing them differ
+         * is the entire point of a confirm gate. The objective is still the fallback,
+         * for a surface rehydrated without ever seeing the open frame.
+         */
+        goalText: withGoal.goalText || message.payload.objective,
         working: false,
         phase: maxRailPhase(withGoal.phase, "confirming"),
       };
@@ -591,6 +628,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
           { kind: "note", id: withGoal.nextId, text: message.message },
         ],
         declined: message.message,
+        declinedClosesIn: message.closes_in_s ?? null,
         declinedGoalId: message.goal_id,
         understanding: null,
         goalText: "",
@@ -634,6 +672,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         activeGoalId: message.goal_id,
         declinedGoalId: null,
         declined: null,
+        declinedClosesIn: null,
         understanding: null,
         // v7.4: the open now carries what the user SAID, and it arrives ~10-60s before
         // the understanding does. Without it the bar reads "Waiting for a goal…" for the
@@ -1066,6 +1105,16 @@ export default function App() {
 
   // The run clock shown in the goal bar: starts with the goal, freezes when the work
   // stops (so it reports how long the run took, not how long the tab has been open).
+  /*
+   * v9 §8.4 — "Close now" is a HANDOFF, not a task.
+   *
+   * The surface ends under the finger: dispatching close_now unmounts this card. So
+   * there is no spinner and no "closing…" state to show — the only honest feedback for
+   * a close button is the closing. What this flag does buy is one detail: the countdown
+   * ring FREEZES on pointer-down, because a ring that keeps draining while the close is
+   * already underway is promising seconds that no longer exist.
+   */
+  const [closingRefusal, setClosingRefusal] = useState(false);
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [runEndedAt, setRunEndedAt] = useState<number | null>(null);
   useEffect(() => {
@@ -1262,12 +1311,11 @@ export default function App() {
   const harnessDraining = state.harness.queue.length > 0 || !state.harness.settled;
   const goalText =
     [...state.transcript].reverse().find((entry) => entry.kind === "goal")?.text ?? state.goalText;
-  const enginesCleared = HARNESS_PIPELINE.filter((e) => {
-    if (e.id === "monitor_adapt") return false;
-    const s = state.harness.engines[e.id].status;
-    return s === "done" || s === "blocked";
-  }).length;
-  const engineTotal = HARNESS_PIPELINE.length - 1; // monitor_adapt is a board engine
+  // v9: enginesCleared/engineTotal used to be computed here purely to feed GoalBar's
+  // hairline. That hairline is gone (it was a third rendering of a count the rail shows
+  // and the pipeline head states in words), and WorkingColumn derives the same numbers
+  // itself from the same harness state — so this was a duplicate derivation as well as a
+  // duplicate display.
 
   const showRun =
     !state.understanding && (harnessStarted(state.harness) || state.working || harnessDraining);
@@ -1299,10 +1347,6 @@ export default function App() {
               : undefined
         }
         fallback={state.plan ? "Your plan" : "Waiting for a goal…"}
-        startedAt={runStartedAt}
-        endedAt={runEndedAt}
-        cleared={enginesCleared}
-        total={engineTotal}
         deviceLabel={pairedDevice?.device_name ?? state.boundDeviceId}
         deviceCount={state.deviceChoices?.length ?? 0}
         connection={connection}
@@ -1333,14 +1377,42 @@ export default function App() {
                 seconds later, and asking someone to acknowledge a "no" would be the
                 interface inventing work. */}
             {state.declined ? (
-              <article className="declined" aria-label="Not something this home can do">
+              <article
+                className={closingRefusal ? "declined declined--closing" : "declined"}
+                aria-label="Not something this home can do"
+              >
                 <header className="declined__head">
-                  <span className="declined__mark" aria-hidden>🤔</span>
+                  <span className="declined__mark">
+                    <Icon name="ban" size={22} />
+                  </span>
                   <h2 className="declined__title">That one isn't mine to take</h2>
                 </header>
                 {goalText ? <p className="declined__quote">“{goalText}”</p> : null}
                 <p className="declined__body">{state.declined}</p>
-                <p className="declined__foot">Nothing was created on your board.</p>
+                {/*
+                  v9 — the user is not made to wait this out.
+                  The card used to auto-dismiss with no way to act: the only thing between
+                  the reader and their kitchen was a sentence and a server-side timer.
+                  Now the close is a button, and the countdown beside it is REAL — the
+                  seconds come off the notice frame, not from a constant copied over here.
+                  When the cloud schedules no close, `declinedClosesIn` is null and no
+                  countdown is drawn at all, because inventing one would be the same
+                  untruth as a determinate bar over an indeterminate run.
+                */}
+                <div className="declined__foot">
+                  {state.declinedClosesIn !== null ? (
+                    <CountdownRing seconds={state.declinedClosesIn} />
+                  ) : null}
+                  <span className="declined__note">Nothing was created on your board.</span>
+                  <button
+                    type="button"
+                    className="btn btn--quiet declined__close"
+                    onPointerDown={() => setClosingRefusal(true)}
+                    onClick={() => dispatch({ type: "close_now" })}
+                  >
+                    Close now
+                  </button>
+                </div>
               </article>
             ) : null}
 
@@ -1350,6 +1422,7 @@ export default function App() {
                 constraints={state.understanding.payload.knew}
                 thought={state.understanding.payload.thought}
                 applied={state.understanding.payload.constraints}
+                window={state.understanding.payload.time_window}
                 preferences={state.understanding.payload.preferences}
                 proposed={state.understanding.payload.proposed_constraints}
                 captureOnly={state.understanding.payload.capture_only}
@@ -1377,6 +1450,9 @@ export default function App() {
                 morphs={state.planMorphs}
                 morphSeq={state.morphSeq}
                 changedImpactLabels={state.changedImpactLabels}
+                composedMs={
+                  runStartedAt !== null && runEndedAt !== null ? runEndedAt - runStartedAt : null
+                }
                 proposalStatuses={state.proposalStatuses}
                 onDecide={(decisions) =>
                   sendDecisions(state.plan!.goal_id, state.plan!.correlation_id, decisions)

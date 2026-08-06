@@ -31,6 +31,8 @@ export interface PlanColumnProps {
   morphs: Record<string, { prevTitle: string; prevDetail?: string }>;
   morphSeq: number;
   changedImpactLabels: string[];
+  /** Wall-clock of the whole run, once it has ended. Null while it is still going. */
+  composedMs: number | null;
   proposalStatuses: ProposalStatusMap;
   onDecide: (decisions: ApprovalDecision[]) => void;
 }
@@ -44,6 +46,7 @@ export function PlanColumn({
   morphs,
   morphSeq,
   changedImpactLabels,
+  composedMs,
   proposalStatuses,
   onDecide,
 }: PlanColumnProps) {
@@ -63,6 +66,7 @@ export function PlanColumn({
           morphs={morphs}
           morphSeq={morphSeq}
           changedImpactLabels={changedImpactLabels}
+          composedMs={composedMs}
           proposalStatuses={proposalStatuses}
           onDecide={onDecide}
         />

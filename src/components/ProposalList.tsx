@@ -34,33 +34,13 @@ import { useMemo, useState } from "react";
 
 import type { ApprovalDecision, PlanProposal } from "../types/contract";
 import type { ProposalStatusMap } from "../types/ui";
+import { Icon } from "./Icon";
 
 export interface ProposalListProps {
   proposals: PlanProposal[];
   statuses: ProposalStatusMap;
   /** Emits the COMPLETE decision set; App wraps it in the single approval frame. */
   onDecide: (decisions: ApprovalDecision[]) => void;
-}
-
-function summarizeArgs(args: Record<string, unknown>): string {
-  const entries = Object.entries(args);
-  if (entries.length === 0) return "";
-  return entries
-    .slice(0, 3)
-    .map(([key, value]) => {
-      const rendered =
-        typeof value === "string"
-          ? value
-          : Array.isArray(value)
-            ? `${value.length} item${value.length === 1 ? "" : "s"}`
-            : value === null
-              ? "null"
-              : typeof value === "object"
-                ? "object"
-                : String(value);
-      return `${key}: ${rendered}`;
-    })
-    .join(" · ");
 }
 
 export function ProposalList({ proposals, statuses, onDecide }: ProposalListProps) {
@@ -110,8 +90,8 @@ export function ProposalList({ proposals, statuses, onDecide }: ProposalListProp
 
       {receipts.map((proposal) => (
         <p key={proposal.proposal_id} className="approval-receipt">
-          <i className="approval-receipt__mark" aria-hidden>
-            ✓
+          <i className="approval-receipt__mark">
+            <Icon name="check" size={15} strokeWidth={2.25} />
           </i>
           <span className="approval-receipt__label">{proposal.action}</span>
           <span className="approval-receipt__note">
@@ -152,17 +132,16 @@ export function ProposalList({ proposals, statuses, onDecide }: ProposalListProp
                     ? "Waiting for your Family Hub…"
                     : status.approved === false
                       ? "Not included"
-                      : `Added ✓${status.detail ? ` — ${status.detail}` : ""}`
+                      : `Added${status.detail ? ` — ${status.detail}` : ""}`
                   : firm && !on
                     ? `Not included — ${proposal.reason}`
                     : proposal.reason}
               </span>
-              {firm ? (
-                <code className="approval__call">
-                  {proposal.module}.{proposal.function}
-                  {summarizeArgs(proposal.args) ? ` · ${summarizeArgs(proposal.args)}` : ""}
-                </code>
-              ) : null}
+              {/* v9: the `ShoppingList.PlaceOrder · estimatedTotal: 58.2` line is gone.
+                  The board dropped the same thing in v7 for the same reason — it names
+                  the API being called, which is a fact about our implementation, and the
+                  arg dump beside it is a serialiser talking. What the person is deciding
+                  is stated above it in their own words, and the money is in the reason. */}
             </div>
 
             {firm && !committed ? (
@@ -172,7 +151,8 @@ export function ProposalList({ proposals, statuses, onDecide }: ProposalListProp
                 aria-pressed={on}
                 onClick={() => toggle(proposal.proposal_id)}
               >
-                {on ? "✓ Included" : "+ Include"}
+                <Icon name={on ? "check" : "plus"} size={16} strokeWidth={2.25} />
+                {on ? "Included" : "Include"}
               </button>
             ) : null}
           </div>
@@ -192,11 +172,19 @@ export function ProposalList({ proposals, statuses, onDecide }: ProposalListProp
           <button type="button" className="btn btn--primary btn--commit" onClick={commit}>
             Approve &amp; Save
           </button>
+          {/*
+            The left-out actions are QUOTED, not lowercased into the sentence.
+            `action` is an imperative — "Place the grocery order" — so folding it into a
+            noun slot produced "Saves 3 of 4 actions — place the grocery order won't
+            happen.", which is not English. Quoting turns the imperative into a name, and
+            that stays grammatical for any action string the device sends, which a
+            hand-tuned phrase would not.
+          */}
           <p className="approvals__consequence">
             {leftOut.length === 0
               ? `Saves all ${includedCount} action${includedCount === 1 ? "" : "s"}.`
               : `Saves ${includedCount} of ${required.length} actions — ${leftOut
-                  .map((p) => p.action.toLowerCase())
+                  .map((p) => `“${p.action}”`)
                   .join(", ")} won't happen.`}
           </p>
         </>

@@ -50,22 +50,22 @@
 /* ------------------------------ primitives ------------------------------ */
 
 .panel-eyebrow {
-  font-size: 0.66rem;
+  font-size: var(--fs-micro);
   font-weight: 600;
-  letter-spacing: 0.15em;
+  letter-spacing: var(--ls-micro);
   text-transform: uppercase;
-  color: var(--ink-faint);
+  color: var(--ink-quiet);
 }
-.panel-meta { font-size: 0.8rem; font-weight: 500; color: var(--ink-faint); }
+.panel-meta { font-size: var(--fs-meta); font-weight: 500; color: var(--ink-quiet); }
 
 .btn {
   border: none;
   border-radius: 18px;
   padding: 0 1.25rem;
   min-height: 56px;
-  font-size: 1.05rem;
+  font-size: var(--fs-body);
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: var(--ls-tight);
   cursor: pointer;
   /* Feedback fires on press, and only transform moves. */
   transition: transform var(--p-press) var(--p-ease-out), background var(--p-press) linear;
@@ -83,15 +83,29 @@
   .approval__switch:hover { background: #fff; }
   .approval--on .approval__switch:hover { background: var(--accent); }
 }
-.btn--primary { background: var(--accent); color: #fff; box-shadow: 0 6px 18px -4px rgba(63, 111, 232, 0.36); }
-.btn--quiet { background: transparent; color: var(--ink-dim); box-shadow: inset 0 0 0 1.5px var(--stroke); flex: 0 0 auto; }
+/* v9: one shadow language. The accent glow under the primary was a second, coloured
+   elevation living beside the neutral card shadow; a full-width solid-accent 56px button
+   is not short of presence. */
+.btn--primary { background: var(--accent); color: #fff; }
+/* v9: a secondary you can see. This was `transparent` with a 1.5px --stroke border —
+   1.23:1 against the card, which is invisible, and paired with dim label text it read as
+   DISABLED on the one screen where declining has to stay expressible. WCAG 1.4.11 wants
+   3:1 for a control boundary. Secondary now means lighter weight, not absent. */
+.btn--quiet {
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  box-shadow: inset 0 0 0 1.5px var(--stroke-strong);
+}
 .btn--commit { width: 100%; margin-top: 0.35rem; }
 .btn--include,
 .btn--included {
-  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 44px;
   border-radius: 12px;
   padding: 0 0.9rem;
-  font-size: 0.9rem;
+  font-size: var(--fs-meta);
   white-space: nowrap;
 }
 .btn--include { background: #fff; color: var(--warn); box-shadow: inset 0 0 0 1.5px var(--warn); }
@@ -126,9 +140,54 @@
   margin: 0; font-size: clamp(1.3rem, 3.2vw, 1.7rem); font-weight: 700;
   letter-spacing: -0.025em; line-height: 1.15; color: var(--ink);
 }
-.declined__quote { margin: 0; font-size: 0.95rem; font-style: italic; color: var(--ink-faint); }
-.declined__body { margin: 0; font-size: 1.03rem; line-height: 1.55; color: var(--ink-dim); }
-.declined__foot { margin: 0; font-size: 0.82rem; color: var(--ink-faint); }
+.declined__quote { margin: 0; font-size: var(--fs-sub); font-style: italic; color: var(--ink-quiet); }
+.declined__body { margin: 0; font-size: var(--fs-lead); line-height: 1.55; color: var(--ink-dim); }
+
+/* The way out. This row used to be one grey sentence and a server-side timer — the
+   reader had no move to make but wait. The button is the agency; the countdown beside it
+   is a courtesy, and it is only drawn when the cloud actually told us a deadline. */
+.declined__foot {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: 0.35rem 0 0;
+}
+.declined__note { flex: 1; min-width: 12ch; font-size: var(--fs-meta); color: var(--ink-quiet); }
+.declined__close { flex: 0 0 auto; }
+
+.countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--ink-quiet);
+  font-size: var(--fs-meta);
+  font-weight: 500;
+}
+.countdown__ring { flex: 0 0 auto; transform: rotate(-90deg); }
+/* LINEAR, and it runs exactly once. A clock that eases lies about how much time is
+   left — the last second would crawl while the middle rushed. Every other motion in
+   this panel is eased precisely because it is physical and this one is not. */
+.countdown__sweep {
+  stroke-dashoffset: 0;
+  animation-name: countdown-drain;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+  animation-iteration-count: 1;
+}
+/* §8.4: the moment the close is committed, the ring stops claiming time it no longer
+   has. Pausing rather than resetting, so it holds exactly where the user last saw it. */
+.declined--closing .countdown__sweep { animation-play-state: paused; }
+.declined--closing .countdown__label { opacity: 0.5; }
+
+@keyframes countdown-drain {
+  to { stroke-dashoffset: var(--c); }
+}
+/* Reduced motion keeps the COUNT and drops the sweep: this is information, not
+   decoration, so it degrades to the label ticking rather than disappearing. */
+@media (prefers-reduced-motion: reduce) {
+  .countdown__sweep { animation: none; stroke-dashoffset: 0; opacity: 0.35; }
+}
 
 /* ---------------------- frame 1 · confirm understanding ------------------ */
 
@@ -146,30 +205,47 @@
 .confirm-card__head { display: flex; flex-direction: column; gap: 0.35rem; }
 .confirm-card__title {
   margin: 0;
-  font-size: clamp(1.45rem, 3.6vw, 1.85rem);
+  font-size: var(--fs-display);
   font-weight: 700;
   line-height: 1.15;
-  letter-spacing: -0.025em;   /* large text wants negative tracking */
+  letter-spacing: var(--ls-display);   /* large text wants negative tracking */
   color: var(--ink);
+}
+/* The window the plan covers, under the goal it covers it for. Quiet: it is context for
+   the heading, not a second heading. */
+.confirm-card__covers {
+  margin: 0.15rem 0 0;
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--ink-quiet);
 }
 .confirm-card__thought {
   margin: 0;
-  font-size: 1.03rem;
+  font-size: var(--fs-lead);
   line-height: 1.55;
   color: var(--ink-dim);
 }
 .confirm-card__resolved { margin: 0; font-weight: 600; color: var(--good); }
+/* Equal halves. Decline used to be a fixed-width block beside a flexible Confirm, which
+   made its width an arbitrary number rather than a decision; the pair is symmetrical and
+   the hierarchy comes from fill-vs-outline, which is where it belongs. */
 .confirm-card__actions { display: flex; gap: 0.75rem; }
-.confirm-card__actions .btn--primary { flex: 1; }
+.confirm-card__actions .btn { flex: 1; }
 
 .constraints { display: flex; flex-direction: column; gap: 0.75rem; }
 .constraints__head { display: flex; align-items: center; justify-content: space-between; }
-.constraints__grid {
+
+/* v9: one column. The old grid was `repeat(auto-fit, minmax(230px, 1fr))`, which on the
+   760px panel resolves to two columns — so THREE constraints rendered as two chips and a
+   half-width orphan beside dead space. Constraint counts come from data and are odd as
+   often as they are even, and a rule the plan can be blocked on is not a thing to lay out
+   on the assumption it comes in pairs. */
+.constraints__list {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 0.75rem;
 }
 
@@ -191,74 +267,91 @@
   background: rgba(255, 255, 255, 0.85);
   display: grid;
   place-items: center;
-  font-size: 1.15rem;
 }
-.constraint__body { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.constraint__body { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; flex: 1; }
 .constraint__label {
-  font-size: 0.63rem;
+  font-size: var(--fs-micro);
   font-weight: 600;
-  letter-spacing: 0.13em;
-  color: var(--ink-faint);
+  letter-spacing: var(--ls-micro);
+  color: var(--ink-quiet);
 }
 .constraint__value {
-  font-size: 1.05rem;
+  font-size: var(--fs-lead);
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: var(--ls-tight);
   color: var(--ink-dim);
   overflow-wrap: anywhere;
 }
-/* v6 provenance, finally rendered (it has been on the wire since v6 and drawn
-   nowhere). Quiet by construction: the value is what the user reads, this only has
-   to be legible when they ask "says who?". */
-.constraint__source {
-  font-size: 0.7rem;
-  font-weight: 500;
-  line-height: 1.25;
-  color: var(--ink-faint);
-  overflow-wrap: anywhere;
-}
+/* The lock is what makes "enforced" readable at a glance. The old chip said so in a
+   0.7rem caption at 2.74:1, which on a fridge door is the same as not saying it. It
+   takes the family's tone, so it reads as part of the same statement. */
+.constraint__mark { flex: 0 0 auto; opacity: 0.75; }
+/* v6's provenance caption (.constraint__source) is gone in v9 — it read "Account ·
+   always enforced" under every single chip. A caption identical on every row is
+   furniture, and the lock already says enforced. */
+/* The tone colours the value, the family icon and the lock together, so a chip reads as
+   one statement rather than a tinted box with unrelated marks in it. This is the payoff
+   of dropping emoji: an emoji cannot take the family's colour, an icon inherits it. */
+.constraint__icon { color: var(--ink-dim); }
 .constraint--warn { background: var(--warn-soft); }
-.constraint--warn .constraint__value { color: var(--warn); }
+.constraint--warn .constraint__value,
+.constraint--warn .constraint__icon,
+.constraint--warn .constraint__mark { color: var(--warn); }
 .constraint--good { background: var(--good-soft); }
-.constraint--good .constraint__value { color: var(--good); }
+.constraint--good .constraint__value,
+.constraint--good .constraint__icon,
+.constraint--good .constraint__mark { color: var(--good); }
 .constraint--violet { background: var(--violet-soft); }
-.constraint--violet .constraint__value { color: var(--violet); }
+.constraint--violet .constraint__value,
+.constraint--violet .constraint__icon,
+.constraint--violet .constraint__mark { color: var(--violet); }
 .constraint--accent { background: var(--accent-soft); }
-.constraint--accent .constraint__value { color: var(--accent); }
+.constraint--accent .constraint__value,
+.constraint--accent .constraint__icon,
+.constraint--accent .constraint__mark { color: var(--accent); }
+.constraint--plain .constraint__mark { color: var(--ink-dim); }
 
-/* --- preferences (v7): the soft half -------------------------------------
-   OUTLINED, never tinted. The constraint chips above are filled because a fill
-   says "this one can stop your plan"; a preference cannot, and giving it the same
-   surface would spend the reader's attention on the thing that matters less. Same
-   reason there is no icon tile: the chips earn one by being safety data. */
+/* --- preferences (v7, reshaped in v9): the soft half ----------------------
+   NOT A BOX. Until v9 this was an outlined chip on the same 18px radius, the same
+   padding and the same icon-then-two-lines anatomy as a constraint — one object in
+   two skins, distinguished only by fill-vs-outline. But the whole reason this
+   section exists is to say that a constraint can stop your plan and a preference
+   cannot, and that difference has to survive being glanced at from across a
+   kitchen. So a constraint is a tinted box with a disc and a lock, and a
+   preference is a bare row: no container, no tint, source pushed to the far edge
+   where it stays available without competing. Density IS the demotion. */
 
 .prefs { display: flex; flex-direction: column; gap: 0.6rem; }
-.prefs__note { margin: 0; font-size: 0.8rem; line-height: 1.4; color: var(--ink-faint); }
+.prefs__note { margin: 0; font-size: var(--fs-meta); line-height: 1.4; color: var(--ink-quiet); }
 .prefs__list {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 .pref {
   display: flex;
   align-items: center;
-  padding: 0.7rem 1rem;
-  border-radius: 18px;
-  background: transparent;
-  box-shadow: inset 0 0 0 1.5px var(--stroke);
+  gap: 0.75rem;
+  padding: 0.4rem 0.15rem;
+  min-width: 0;
 }
-.pref__body { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.pref__icon { flex: 0 0 auto; color: var(--ink-dim); }
 .pref__label {
-  font-size: 0.95rem;
-  font-weight: 600;
-  letter-spacing: -0.005em;
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sub);
+  font-weight: 500;
+  letter-spacing: 0;
   color: var(--ink-dim);
   overflow-wrap: anywhere;
 }
-.pref__source { font-size: 0.7rem; font-weight: 500; line-height: 1.25; color: var(--ink-faint); }
+/* .pref__source is gone in v9. The claim it was justified by — "the answer genuinely
+   differs per row" — did not survive looking at a real run: every row said
+   "Account · relevance" or "Derived · relevance", i.e. the name of our own selection
+   pass, twice, in the reader's peripheral vision. */
 
 /* --- capture (v6-M4): rules the user stated, offered for confirmation ------
    Visually SEPARATE from the constraint chips above. Those are settled policy the
@@ -303,6 +396,10 @@
 /* --------------------------- frame 2 · the run --------------------------- */
 
 .run { display: flex; flex-direction: column; gap: 1.15rem; min-height: 0; }
+/* Two collapsed bars of the same weight sitting one above the other — pipeline, then
+   the reasoning. They are one group, so they sit closer together than the run's parts
+   did while it was running. */
+.run--compact { gap: 0.5rem; }
 
 .focus {
   background: var(--surface);
@@ -323,12 +420,6 @@
   letter-spacing: -0.025em;
   line-height: 1.2;
   color: var(--ink);
-}
-.focus__elapsed {
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--ink-faint);
-  font-variant-numeric: tabular-nums;
 }
 .focus__spinner {
   flex: 0 0 auto;
@@ -364,26 +455,34 @@
   background: var(--accent);
   flex: 0 0 auto;
 }
-.focus__track { height: 4px; border-radius: 2px; background: var(--surface-2); overflow: hidden; }
-.focus__fill {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-  background: var(--accent);
-  /* Advances only on a real engine clear — no fake crawl between beats. */
-  transition: width 400ms var(--p-ease-out);
-}
-.focus__details { font-size: 0.9rem; }
+/* .focus__track / .focus__fill deleted in v9 — see WorkingColumn for why an
+   indeterminate run must not be given a determinate bar. */
+
+.focus__details { font-size: var(--fs-sub); }
+/* A CONTROL, not a text link. This is the only thing the panel invites you to touch
+   while the run is going, and it was a 0.9rem line of accent text with a `⌄` glyph
+   pasted on by `content:` — about 20px of target on a screen you reach for standing up.
+   The motion spec asks for >=60px with hit padding; this is 56 plus the row's own gap.
+   The chevron is a real Icon now, so it can rotate rather than be swapped for `⌃`
+   (U+2303, which is the Mac control-key symbol, not a chevron). */
 .focus__summary {
   cursor: pointer;
   list-style: none;
-  color: var(--accent);
-  font-weight: 500;
-  padding: 0.15rem 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 56px;
+  border-radius: 18px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1.5px var(--stroke-strong);
+  color: var(--ink-dim);
+  font-size: var(--fs-sub);
+  font-weight: 600;
+  transition: transform var(--p-press) var(--p-ease-out);
 }
+.focus__summary:active { transform: scale(0.97); }
 .focus__summary::-webkit-details-marker { display: none; }
-.focus__summary::before { content: "⌄ "; }
-.focus__details[open] .focus__summary::before { content: "⌃ "; }
 .focus__drawer {
   margin-top: 0.7rem;
   display: flex;
@@ -392,6 +491,9 @@
   animation: panel-land 200ms var(--p-ease-out) both;
 }
 .focus__empty { color: var(--ink-faint); }
+/* Read AFTER the run, the transcript is a document rather than a tail being watched, and
+   nothing above it is competing for the screen any more — so it gets more of it. */
+.run--compact .focus__transcript { max-height: 340px; }
 .focus__transcript {
   max-height: 220px;
   overflow-y: auto;
@@ -401,7 +503,10 @@
 }
 /* one block per engine that spoke — the label is what makes silence readable */
 .focus__block + .focus__block { margin-top: 0.75rem; }
-.focus__who { display: block; margin-bottom: 0.2rem; }
+/* The engine's name, and — since v9 — the verdict it ended on, so a section for an engine
+   that never narrated still carries the fact it reported. */
+.focus__who { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.2rem; }
+.focus__verdict { text-transform: none; letter-spacing: 0; color: var(--good); font-weight: 600; }
 /* pre-wrap belongs to the TEXT, not to the container: the container now holds elements,
    and preserving whitespace around them turns the markup's own indentation into blank
    lines that push later blocks out of the scroller. */
@@ -589,14 +694,19 @@
 
 /* collapsed, once the plan is the hero */
 .pipe-collapsed { border-radius: 18px; background: rgba(255, 255, 255, 0.72); box-shadow: inset 0 0 0 1px var(--stroke-soft, var(--stroke)); }
+/* The whole bar is the expand control — on stage this is what gets tapped to show the
+   engine rail, so it is a 56px row, not a chevron you have to hit. */
 .pipe-collapsed__bar {
   list-style: none;
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.85rem 1.1rem;
+  min-height: 56px;
+  padding: 0.5rem 1.1rem;
+  transition: transform var(--p-press) var(--p-ease-out);
 }
+.pipe-collapsed__bar:active { transform: scale(0.99); }
 .pipe-collapsed__bar::-webkit-details-marker { display: none; }
 .pipe-collapsed__mark {
   width: 22px;
@@ -610,9 +720,19 @@
   font-weight: 700;
   font-style: normal;
 }
-.pipe-collapsed__label { flex: 1; font-size: 0.95rem; font-weight: 500; color: var(--ink-dim); }
-.pipe-collapsed__chevron::before { content: "⌄"; color: var(--ink-faint); }
-.pipe-collapsed[open] .pipe-collapsed__chevron::before { content: "⌃"; }
+/* The reasoning bar's mark is NOT a green tick: a tick is a verdict, and "here is what
+   it said" is not a thing that passed or failed. Same disc, neutral ink. */
+.pipe-collapsed__mark--quiet { background: var(--surface-2); color: var(--ink-quiet); }
+.pipe-collapsed__label { flex: 1; font-size: var(--fs-sub); font-weight: 500; color: var(--ink-dim); }
+/* The chevron TURNS rather than being swapped for a different character. Two glyphs
+   cannot be tweened; one element can, and the rotation is the affordance telling you
+   which way the drawer is about to go. Mirrored on close, per the motion spec. */
+.pipe-collapsed__chevron {
+  flex: 0 0 auto;
+  color: var(--ink-quiet);
+  transition: transform var(--p-dur) var(--p-ease-in-out);
+}
+.pipe-collapsed[open] .pipe-collapsed__chevron { transform: rotate(180deg); }
 .pipe--inset { padding: 0 1.1rem 0.6rem; }
 
 /* --------------------------- the forming plan ---------------------------- */
@@ -649,7 +769,7 @@
   flex-direction: column;
   gap: 0.85rem;
 }
-.result__head { display: flex; align-items: center; gap: 0.85rem; }
+.result__head { display: flex; align-items: center; gap: 0.85rem; flex-wrap: wrap; }
 .result__mark {
   width: 30px;
   height: 30px;
@@ -664,29 +784,59 @@
 }
 .result__mark--ok { background: var(--good); }
 .result__mark--blocked { background: var(--danger); }
-.result__titles { display: flex; flex-direction: column; gap: 0.15rem; }
-.result__title { margin: 0; font-size: clamp(1.25rem, 3.2vw, 1.6rem); font-weight: 700; letter-spacing: -0.025em; line-height: 1.15; color: var(--ink); }
-.result__sub { margin: 0; font-size: 0.95rem; color: var(--ink-dim); }
+.result__titles { display: flex; flex-direction: column; gap: 0.15rem; flex: 1; min-width: 0; }
+.result__title { margin: 0; font-size: var(--fs-display); font-weight: 700; letter-spacing: var(--ls-display); line-height: 1.15; color: var(--ink); }
+.result__sub { margin: 0; font-size: var(--fs-meta); color: var(--ink-quiet); }
 .result__badges { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; }
 
-.safety-pill { font-size: 0.82rem; font-weight: 600; padding: 0.4rem 0.8rem; border-radius: 20px; }
+.safety-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  padding: 0.4rem 0.8rem;
+  border-radius: 20px;
+}
 .safety-pill--passed { background: var(--good-soft); color: var(--good); }
 .safety-pill--blocked { background: var(--danger-soft); color: var(--danger); }
 
-.why-plan { font-size: 0.85rem; }
-.why-plan__summary {
+/* The run's evidence, one tap away and NOT competing with the plan.
+   Renamed from .why-plan in v9 along with its label: "Why this plan" described only the
+   explanation, but this is where the whole run goes when it settles — the rationale is
+   the part of it worth reading. It sits in the head beside the title rather than in the
+   badge row, so the badges are purely "how it was checked".
+   It is quieter than it was (a bordered neutral pill, not an accent one): the accent on
+   this screen belongs to "Approve & Save". */
+.result__why { flex: 0 0 auto; font-size: var(--fs-meta); }
+/* Open, it claims the whole row: the head is a wrapping flex line, and a paragraph
+   squeezed into the width of its own trigger is unreadable. */
+.result__why[open] { flex: 1 0 100%; }
+.result__why-summary {
   list-style: none;
   cursor: pointer;
-  padding: 0.4rem 0.8rem;
-  border-radius: 20px;
-  background: var(--accent-soft);
-  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 44px;
+  padding: 0 0.85rem;
+  border-radius: 16px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1.5px var(--stroke-strong);
+  color: var(--ink-dim);
   font-weight: 600;
+  transition: transform var(--p-press) var(--p-ease-out);
 }
-.why-plan__summary::-webkit-details-marker { display: none; }
-.why-plan__summary::before { content: "▸ "; }
-.why-plan[open] .why-plan__summary::before { content: "▾ "; }
-.why-plan__body { margin: 0.6rem 0 0; color: var(--ink-dim); line-height: 1.55; }
+.result__why-summary:active { transform: scale(0.97); }
+.result__why-summary::-webkit-details-marker { display: none; }
+.result__why-summary svg { transition: transform var(--p-dur) var(--p-ease-in-out); }
+.result__why[open] .result__why-summary svg { transform: rotate(180deg); }
+.result__why-body {
+  margin: 0.6rem 0 0;
+  color: var(--ink-dim);
+  line-height: 1.55;
+  animation: panel-land 200ms var(--p-ease-out) both;
+}
 
 .knew {
   margin: 0;
@@ -708,7 +858,8 @@
 .day__row {
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(64px, 96px) 1fr auto auto;
+  /* v9: a fifth column for the row's mark, between the date and the title. */
+  grid-template-columns: minmax(64px, 96px) auto 1fr auto auto;
   align-items: center;
   gap: 0.9rem;
   padding: 0.7rem 0;
@@ -722,6 +873,10 @@
 }
 .day .day__row:active { transform: scale(0.995); }
 .day__when { font-size: 0.8rem; font-weight: 500; color: var(--ink-faint); }
+/* Quiet by default — it is a recognition aid, not a status. A SKIPPED row's plane is the
+   one that earns colour, because there the mark IS the news. */
+.day__mark { color: var(--ink-quiet); }
+.day--skipped .day__mark { color: var(--accent); }
 .day__titles { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
 .day__title { font-size: clamp(0.98rem, 2.2vw, 1.1rem); overflow-wrap: anywhere; font-weight: 600; letter-spacing: -0.015em; color: var(--ink); }
 .day__old { font-size: 0.78rem; color: var(--ink-faint); display: inline-flex; gap: 0.35rem; }
@@ -734,8 +889,9 @@
   margin-right: 0.35rem;
 }
 .day__updated { font-size: 0.7rem; font-weight: 600; color: var(--accent); background: var(--accent-soft); padding: 0.2rem 0.5rem; border-radius: 8px; }
-.day__chevron { color: var(--ink-faint); font-style: normal; transition: transform var(--p-dur) var(--p-ease-in-out); }
-.day__chevron::before { content: "⌄"; }
+.day__why-mark { flex: 0 0 auto; margin-right: 0.25rem; vertical-align: -2px; }
+.weighed__mark { vertical-align: -2px; margin-right: 0.3rem; }
+.day__chevron { flex: 0 0 auto; color: var(--ink-quiet); transition: transform var(--p-dur) var(--p-ease-in-out); }
 .day--open .day__chevron { transform: rotate(180deg); }
 
 /* Collapse animates the row track, so the detail can stay mounted and the open/close
@@ -753,7 +909,8 @@
 .day__tags { display: flex; flex-wrap: wrap; gap: 0.45rem; padding-bottom: 0.85rem; }
 .tag { font-size: 0.76rem; font-weight: 600; padding: 0.3rem 0.6rem; border-radius: 9px; background: var(--good-soft); color: var(--good); }
 .tag--why { background: var(--accent-soft); color: var(--accent); }
-.tag--why::before { content: "▸ "; }
+/* The mark is an icon inside the chip now, so it takes the chip's accent with it. */
+.tag--why { display: inline-flex; align-items: center; gap: 0.25rem; }
 
 /* v7: the why, on the row rather than behind a disclosure. Quiet enough that the title
    still leads, loud enough that it is read without being asked for. */
@@ -809,7 +966,7 @@
 }
 .approvals__head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .approvals__none, .approvals__committed { margin: 0.3rem 0 0; font-size: 0.9rem; color: var(--ink-dim); }
-.approvals__consequence { margin: 0.15rem 0 0; font-size: 0.82rem; color: var(--ink-faint); text-align: center; }
+.approvals__consequence { margin: 0.15rem 0 0; font-size: var(--fs-meta); color: var(--ink-quiet); text-align: center; }
 
 .approval-receipt {
   margin: 0;
@@ -818,7 +975,7 @@
   gap: 0.6rem;
   font-size: 0.92rem;
 }
-.approval-receipt__mark { color: var(--good); font-style: normal; font-weight: 700; }
+.approval-receipt__mark { color: var(--good); font-style: normal; display: inline-flex; align-items: center; }
 .approval-receipt__label { flex: 1; color: var(--ink-dim); }
 .approval-receipt__note { font-size: 0.78rem; color: var(--ink-faint); }
 
@@ -835,7 +992,8 @@
 .approval__action { font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
 .approval__reason { font-size: 0.8rem; color: var(--ink-faint); }
 .approval--firm .approval__reason { color: var(--warn); font-weight: 500; }
-.approval__call { font-size: 0.7rem; color: var(--ink-faint); overflow-wrap: anywhere; }
+/* v9: .approval__call is gone — it styled `Module.Function · arg: value`, which is our
+   implementation talking on a screen where someone is deciding about their money. */
 
 .approval__switch {
   flex: 0 0 auto;
