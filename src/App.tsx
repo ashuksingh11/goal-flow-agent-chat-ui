@@ -1234,17 +1234,35 @@ export default function App() {
    *
    * This does NOT block the "Hear this" replay — that calls queue.retry(), which
    * re-plays what the queue is already holding rather than pushing a new frame.
+   *
+   * v11.7 — AND THE POSITIONAL CURSOR IS GONE, because it was silently eating the plan.
+   *
+   * There used to be a `spokenCursor` index alongside this, draining
+   * `state.speech.slice(cursor)`. An index is only meaningful while the array it points
+   * into grows monotonically, and `state.speech` does NOT: the reducer resets it to []
+   * on `present_plan` (and on five other transitions). The guard for that was
+   * `if (length < cursor) cursor = 0`, which is right only when the replacement array is
+   * SHORTER.
+   *
+   * Measured on a real run: cursor sits at 3 after understanding + working_start +
+   * working_plan; `present_plan` clears the list and the three frames that follow it in
+   * the same React batch (plan, plan-1, approvals) bring the length back to exactly 3.
+   * `3 < 3` is false, the cursor stays at 3, `slice(3)` is empty — and the entire plan
+   * narration and the approvals line are never spoken. It depends on how many SENTENCES
+   * the earlier cues split into, which is why it presents as "sometimes the plan audio
+   * doesn't come".
+   *
+   * Identity replaces position. The set above already knows what has been spoken, so
+   * scanning the whole list costs one Set lookup per frame (there are single digits of
+   * them) and cannot be confused by the array being replaced underneath it.
    */
-  const spokenCursor = useRef(0);
   const spokenIds = useRef(new Set<string>());
   useEffect(() => {
-    if (state.speech.length < spokenCursor.current) spokenCursor.current = 0; // reset
-    for (const frame of state.speech.slice(spokenCursor.current)) {
+    for (const frame of state.speech) {
       if (spokenIds.current.has(frame.payload.utterance_id)) continue;
       spokenIds.current.add(frame.payload.utterance_id);
       speechQueueRef.current?.push(frame.payload);
     }
-    spokenCursor.current = state.speech.length;
   }, [state.speech]);
 
   // The goal changed, or the surface reset: abandon everything queued. Those utterances
