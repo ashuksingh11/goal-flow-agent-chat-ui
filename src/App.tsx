@@ -1213,10 +1213,35 @@ export default function App() {
    * was never spoken at all. Reproduced on every live run; invisible to every headless
    * test, because a headless client has no reducer to batch.
    */
+  /*
+   * v11.6 — AND NOTHING IS EVER SPOKEN TWICE.
+   *
+   * The cursor alone is not enough, because the same utterance can legitimately arrive
+   * again. The socket reconnects on any non-1012 close and re-sends `hello`; the cloud
+   * answers a fresh bind with `_replay_create_phase`, which deliberately replays the
+   * `understanding`, `plan` and `approvals` speech so a webview that binds mid-gate
+   * still hears the question. That is right for a NEW webview and wrong for this one —
+   * a document that already spoke those lines gets them again, and the voice repeats
+   * itself minutes later at an untouched approval screen. Reported from a real run:
+   * leave the approvals up and it starts talking again.
+   *
+   * The fix belongs here rather than in the cloud, which cannot tell a reconnecting
+   * socket from a new surface. `utterance_id` is deterministic per (goal_id, cue) and
+   * per sentence within it (`<cue>` then `<cue>-1`, `<cue>-2`…), so it identifies the
+   * utterance exactly. The set lives as long as the document; a genuinely new webview
+   * is a new document with an empty set, so the replay still works for the case it was
+   * built for.
+   *
+   * This does NOT block the "Hear this" replay — that calls queue.retry(), which
+   * re-plays what the queue is already holding rather than pushing a new frame.
+   */
   const spokenCursor = useRef(0);
+  const spokenIds = useRef(new Set<string>());
   useEffect(() => {
     if (state.speech.length < spokenCursor.current) spokenCursor.current = 0; // reset
     for (const frame of state.speech.slice(spokenCursor.current)) {
+      if (spokenIds.current.has(frame.payload.utterance_id)) continue;
+      spokenIds.current.add(frame.payload.utterance_id);
       speechQueueRef.current?.push(frame.payload);
     }
     spokenCursor.current = state.speech.length;

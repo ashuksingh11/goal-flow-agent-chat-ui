@@ -131,6 +131,23 @@ check(/speech:\s*\[\.\.\.withGoal\.speech,\s*message\]/.test(app),
 check(/spokenCursor/.test(app),
   "and the effect must drain from a cursor rather than react to one value");
 
+// --- v11.6: an utterance is spoken at most once ---------------------------------------
+//
+// The cursor stops the SAME frame being drained twice; it does nothing about the same
+// utterance ARRIVING twice, which is a normal event. The socket reconnects on any
+// non-1012 close and re-sends `hello`, and the cloud answers a fresh bind by replaying
+// the understanding / plan / approvals speech — correct for a webview that binds
+// mid-gate, wrong for this one, which already said all of it. Symptom from a real run:
+// leave the approvals screen untouched and the voice starts up again minutes later.
+//
+// The cloud cannot fix this: it cannot tell a reconnecting socket from a new surface.
+check(/spokenIds/.test(app),
+  "App must remember which utterance_ids it has spoken — the cloud replays speech to any freshly-bound socket, so a reconnect repeats the plan and approvals lines into a screen that already heard them");
+check(/spokenIds\.current\.has\(frame\.payload\.utterance_id\)/.test(app),
+  "and it must skip on utterance_id, which is deterministic per (goal_id, cue) and per sentence within it — the only stable identity an utterance has");
+check(/new Set<string>\(\)/.test(app) && !/spokenIds\.current\.clear\(\)/.test(app),
+  "the set must live as long as the DOCUMENT and never be cleared: a genuinely new webview is a new document with an empty set, so the cloud's replay still serves the case it was built for");
+
 // --- barge-in must not eat its own button --------------------------------------------
 check(/closest\?\.\(["'`]\.speak-chip/.test(app),
   "barge-in must EXEMPT .speak-chip: the listener is on capture, so without this the tap clears the queue before the chip's own handler asks it to replay — and the one button whose job is to make audio happen silently does nothing");
