@@ -312,6 +312,48 @@ const MIN_SAVING_MS = 5200;
 
 const MAX_TICKS = 40;
 
+/* ---------------------------------------------------------------------------
+ * WHAT THIS DOCUMENT HAS ALREADY SAID OUT LOUD (v11.8).
+ *
+ * The in-memory Set is enough for a webview that lives once. It is not enough on a
+ * Family Hub, where the webview's lifetime belongs to native Bixby: reported from a
+ * real Hub and NOT reproducible on Ubuntu, the voice repeats after a tap. A reload of
+ * the webview slot gives a fresh document with an empty Set, the socket rebinds, and
+ * the cloud replays the create-phase speech — correctly, for a surface it has every
+ * reason to think is new.
+ *
+ * `sessionStorage`, deliberately, and the choice is the whole point:
+ *   - it SURVIVES a reload of the same webview slot, which is the bug;
+ *   - it does NOT survive a genuinely new surface, so the cloud's replay still serves
+ *     the case it exists for — a webview that binds mid-gate hears the question.
+ * localStorage would silence that second case forever, which is worse than the bug.
+ *
+ * Bounded, because a webview that somehow lives a long time should not grow a list
+ * forever. Newest-last: an utterance is only at risk of repeating while its screen is
+ * still up, so the oldest ids are the ones safe to forget.
+ * ------------------------------------------------------------------------- */
+const SPOKEN_KEY = "goalflow:spoken";
+const SPOKEN_LIMIT = 60;
+
+function loadSpokenIds(): Set<string> {
+  try {
+    const raw = window.sessionStorage.getItem(SPOKEN_KEY);
+    return new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    // A webview with storage disabled still works; it just loses the reload guard.
+    return new Set<string>();
+  }
+}
+
+function rememberSpoken(ids: Set<string>): void {
+  try {
+    const kept = Array.from(ids).slice(-SPOKEN_LIMIT);
+    window.sessionStorage.setItem(SPOKEN_KEY, JSON.stringify(kept));
+  } catch {
+    /* Storage full or blocked: the in-memory Set still guards this document. */
+  }
+}
+
 /** agent_event → live stream entries (the "watch it think" reduction). */
 function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
   if (event.seq <= state.lastSeq) {
@@ -1256,11 +1298,12 @@ export default function App() {
    * scanning the whole list costs one Set lookup per frame (there are single digits of
    * them) and cannot be confused by the array being replaced underneath it.
    */
-  const spokenIds = useRef(new Set<string>());
+  const spokenIds = useRef(loadSpokenIds());
   useEffect(() => {
     for (const frame of state.speech) {
       if (spokenIds.current.has(frame.payload.utterance_id)) continue;
       spokenIds.current.add(frame.payload.utterance_id);
+      rememberSpoken(spokenIds.current);
       speechQueueRef.current?.push(frame.payload);
     }
   }, [state.speech]);

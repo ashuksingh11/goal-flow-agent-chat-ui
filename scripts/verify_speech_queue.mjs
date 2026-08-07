@@ -128,8 +128,18 @@ check(/speech:\s*Speech\[\]/.test(app),
   "state.speech must be a LIST — a single slot loses one of any two utterances that arrive in the same React batch, which is exactly what plan+approvals do");
 check(/speech:\s*\[\.\.\.withGoal\.speech,\s*message\]/.test(app),
   "the reducer must APPEND, so two frames in one tick are both representable");
-check(/spokenCursor/.test(app),
-  "and the effect must drain from a cursor rather than react to one value");
+// v11.7 — and it must NOT drain from a positional cursor. This check used to assert the
+// opposite, and it kept passing after the cursor was deleted because the word survives in
+// the comment explaining why. A gate satisfied by prose is not a gate.
+//
+// An index is only meaningful while the array grows monotonically, and `state.speech` is
+// reset to [] on present_plan and five other transitions. Whenever the post-reset batch
+// came back at least as long as the old cursor, `slice(cursor)` was empty and the plan
+// narration was never spoken at all: 3 of 3 real goals lost it.
+check(!/const spokenCursor = useRef/.test(app),
+  "the positional cursor must stay deleted — it silently ate the plan narration whenever state.speech was reset to a list at least as long as the cursor");
+check(/for \(const frame of state\.speech\)/.test(app),
+  "the effect must scan the WHOLE list and skip by identity; position cannot survive an array the reducer replaces");
 
 // --- v11.6: an utterance is spoken at most once ---------------------------------------
 //
@@ -145,8 +155,21 @@ check(/spokenIds/.test(app),
   "App must remember which utterance_ids it has spoken — the cloud replays speech to any freshly-bound socket, so a reconnect repeats the plan and approvals lines into a screen that already heard them");
 check(/spokenIds\.current\.has\(frame\.payload\.utterance_id\)/.test(app),
   "and it must skip on utterance_id, which is deterministic per (goal_id, cue) and per sentence within it — the only stable identity an utterance has");
-check(/new Set<string>\(\)/.test(app) && !/spokenIds\.current\.clear\(\)/.test(app),
-  "the set must live as long as the DOCUMENT and never be cleared: a genuinely new webview is a new document with an empty set, so the cloud's replay still serves the case it was built for");
+check(!/spokenIds\.current\.clear\(\)/.test(app),
+  "the set must never be cleared mid-document, or the cloud's next replay repeats everything");
+
+// v11.8 — and it must survive a RELOAD of the webview slot. Reported from a Tizen Hub
+// and not reproducible on Ubuntu: the Hub owns the webview's lifetime, so the document
+// can be replaced under us, and a fresh document with an empty Set hears the cloud's
+// create-phase replay as new. sessionStorage is the deliberate middle: it survives a
+// reload of the same slot, and does NOT survive a genuinely new surface — which must
+// still hear the question it binds in the middle of.
+check(/sessionStorage/.test(app),
+  "spoken utterance ids must survive a webview reload — the Hub can replace the document under us, and an empty Set turns the cloud's replay back into a repeat");
+check(!/localStorage\.getItem\(SPOKEN_KEY|localStorage\.setItem\(SPOKEN_KEY/.test(app),
+  "and NOT localStorage: that would silence a genuinely new webview that binds mid-gate, which is the case the cloud's replay exists to serve");
+check(/SPOKEN_LIMIT/.test(app),
+  "the persisted list must be bounded");
 
 // --- barge-in must not eat its own button --------------------------------------------
 check(/closest\?\.\(["'`]\.speak-chip/.test(app),
