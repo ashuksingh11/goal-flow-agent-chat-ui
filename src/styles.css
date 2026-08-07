@@ -1189,3 +1189,209 @@ summary:focus-visible {
   transition: width var(--dur) var(--ease-out);
 }
 
+
+/* ------------------------------- the aurora (v11.4) -------------------------------
+   Light that is on while the Hub is talking, and off the rest of the time. Rationale
+   for the shape of it — and for the dock this replaced — lives in components/Aurora.tsx.
+
+   THREE PROPERTIES HERE ARE LOAD-BEARING AND SHOULD NOT BE "TIDIED":
+
+   1. `pointer-events: none`. Barge-in (speech queue rule 5) is a tap ANYWHERE stopping
+      the voice, and this thing covers the bottom of the panel — including, on a long
+      plan, the Approve & Save button. It must let every pointer event through.
+   2. `z-index: 40`, which is above `.saving` at 30. The saving takeover is fixed,
+      inset 0, and cue 5 — the goodbye — plays over it. That is the moment the light
+      matters MOST, because by then there is no card left to look at.
+   3. No `filter: blur()`, no `backdrop-filter`, no `mask-image`. Each layer's centre
+      sits BELOW the bottom edge, so the radial gradient's own falloff is the fade. The
+      Hub's webview is years old; four blurred layers repainting at 60fps is not a bet
+      worth taking, and gradients composite for free.
+
+   Only `transform` and `opacity` animate, on every rule below.
+   ---------------------------------------------------------------------------------- */
+.aurora {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 178px;
+  z-index: 40;
+  pointer-events: none;
+  overflow: hidden;
+  /* The resting state is also the EXIT state: enter and exit run the same path, so the
+     light leaves the way it arrived (down, and dimming) rather than being switched off
+     somewhere else. */
+  opacity: 0;
+  transform: translate3d(0, 28px, 0) scale(1.05);
+  transform-origin: 50% 100%;
+  /* Slower out than in: light dims. 620ms out, 520ms in — see the motion spec frame
+     `V11 · 2 Aurora` in goal-flow2.pen. A TRANSITION, not a keyframe animation, so an
+     interrupt (barge-in) animates from the live computed value instead of jumping to
+     the top of an exit it never started. */
+  transition: opacity 620ms ease-out, transform 620ms ease-out;
+}
+.aurora--on {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
+  /* Critically damped, no overshoot — nothing was thrown, so nothing should bounce. */
+  transition:
+    opacity 520ms cubic-bezier(0.32, 0.72, 0, 1),
+    transform 520ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.aurora__layer {
+  position: absolute;
+  display: block;
+  will-change: transform, opacity;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+
+.aurora__layer--wash {
+  left: -13.2%;
+  top: 37.5%;
+  width: 126.3%;
+  height: 125%;
+  background: radial-gradient(
+    closest-side,
+    rgba(63, 111, 232, 0.3) 0%,
+    rgba(63, 111, 232, 0.16) 55%,
+    rgba(63, 111, 232, 0) 100%
+  );
+  animation-name: aurora-drift-a, aurora-breathe-a;
+  animation-duration: 2.8s, 2.2s;
+}
+
+/* THE SWAY WRAPPER carries the position and the horizontal travel; the curtain INSIDE
+   it stretches and lifts on a different period (see Aurora.tsx for why it is two
+   elements). Each is 129% of the band's width and hangs off both sides, so ±80px of
+   sway never walks an edge into view.
+
+   Geometry mirrors each viewBox in Aurora.tsx: top = (viewBox y / 320), height = the
+   rest. Change one and the other is wrong. */
+.aurora__sway {
+  left: -14.5%;
+  width: 128.9%;
+}
+.aurora__sway--blue {
+  top: 25%;
+  height: 75%;
+  animation-name: aurora-sway-b;
+  animation-duration: 1.7s;
+}
+.aurora__sway--violet {
+  top: 34.4%;
+  height: 65.6%;
+  animation-name: aurora-sway-c;
+  animation-duration: 2.2s;
+}
+.aurora__sway--rose {
+  top: 43.8%;
+  height: 56.2%;
+  animation-name: aurora-sway-d;
+  animation-duration: 1.4s;
+}
+
+.aurora__curtain {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* The crest rises and falls while the base stays welded to the panel edge — a curtain
+     of light rather than a picture sliding sideways. */
+  transform-origin: 50% 100%;
+  will-change: transform, opacity;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+.aurora__curtain--blue {
+  animation-name: aurora-drift-b, aurora-breathe-b;
+  animation-duration: 1.3s, 2.5s;
+}
+.aurora__curtain--violet {
+  animation-name: aurora-drift-c, aurora-breathe-c;
+  animation-duration: 1.6s, 3.1s;
+}
+.aurora__curtain--rose {
+  animation-name: aurora-drift-d, aurora-breathe-d;
+  animation-duration: 1.15s, 2.1s;
+}
+
+/* Eight periods across two nested elements — 5/3.5, 3.2+2.4/3.7, 4.1+2.9/4.6,
+   2.6+2.05/3.1 — chosen to share no factors, so a layer never beats back to the same
+   silhouette.
+
+   THESE ARE FAST ON PURPOSE, and they were wrong three times before they were right:
+   14-23s, then 5.5-13s, then 2-5s. Every one of them animated correctly and every one
+   was reported as "not moving".
+
+   TWO SEPARATE LESSONS, and the second took longest to see:
+     - a smooth, translucent, low-contrast silhouette needs FAR more velocity than
+       intuition says: ~50px/s is the floor before the eye calls it motion at all;
+     - HORIZONTAL sliding of a wide smooth wave is the least visible motion there is,
+       because every part of it looks like every other part. The CREST RISING AND
+       FALLING is what the eye catches, which is why scaleY now swings 0.8-1.25 rather
+       than the 0.88-1.16 it started at. Speed alone was never going to fix this.
+
+   Clipping the crest at the top of the band is safe: each viewBox starts at that
+   curtain's highest point, so the gradient is fully transparent exactly there. */
+@keyframes aurora-drift-a {
+  from { transform: translate3d(-40px, 6px, 0) scale(0.96); }
+  to   { transform: translate3d(40px, -6px, 0) scale(1.06); }
+}
+@keyframes aurora-sway-b {
+  from { transform: translate3d(-78px, 0, 0); }
+  to   { transform: translate3d(74px, 0, 0); }
+}
+@keyframes aurora-sway-c {
+  from { transform: translate3d(66px, 0, 0); }
+  to   { transform: translate3d(-72px, 0, 0); }
+}
+@keyframes aurora-sway-d {
+  from { transform: translate3d(58px, 0, 0); }
+  to   { transform: translate3d(-64px, 0, 0); }
+}
+/* scaleX is the one that matters: stretching the wave HORIZONTALLY moves the crests
+   relative to each other, so the silhouette changes shape instead of merely travelling. */
+@keyframes aurora-drift-b {
+  from { transform: translate3d(0, 12px, 0) scale(0.9, 0.8); }
+  to   { transform: translate3d(0, -14px, 0) scale(1.13, 1.24); }
+}
+@keyframes aurora-drift-c {
+  from { transform: translate3d(0, -13px, 0) scale(1.12, 1.22); }
+  to   { transform: translate3d(0, 12px, 0) scale(0.89, 0.79); }
+}
+@keyframes aurora-drift-d {
+  from { transform: translate3d(0, 11px, 0) scale(0.9, 0.81); }
+  to   { transform: translate3d(0, -12px, 0) scale(1.14, 1.25); }
+}
+@keyframes aurora-breathe-a { from { opacity: 0.62; } to { opacity: 1; } }
+@keyframes aurora-breathe-b { from { opacity: 0.74; } to { opacity: 1; } }
+@keyframes aurora-breathe-c { from { opacity: 1; } to { opacity: 0.72; } }
+@keyframes aurora-breathe-d { from { opacity: 0.78; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  /* It still ARRIVES and LEAVES — that is the information, and a cross-fade carries it
+     without moving anything. What goes is the drift: a slow, wide, endlessly oscillating
+     field along the bottom of the screen is precisely the vestibular pattern to drop. */
+  .aurora {
+    transform: none;
+    transition: opacity 260ms ease;
+  }
+  .aurora--on {
+    transform: none;
+    transition: opacity 200ms ease;
+  }
+  .aurora__layer { animation: none; }
+  .aurora__sway,
+  .aurora__curtain { animation: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  /* Nothing to harden — it is all translucency, and it carries no information. The one
+     element on this surface that loses nothing by being absent. */
+  .aurora { display: none; }
+}
+@media (prefers-contrast: more) {
+  .aurora { display: none; }
+}

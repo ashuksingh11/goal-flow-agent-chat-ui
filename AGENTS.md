@@ -67,8 +67,23 @@ approval). `src/types/contract.ts` MIRRORS the cloud's `CONTRACT.md`. System des
   and the card renders a "Hear this" tap for `blocked`. `primeOnFirstGesture()` spends
   any stray tap on unlocking audio so that button is rarely seen. One reused
   `HTMLAudioElement` — two would let utterances overlap, and two voices on a fridge is
-  worse than none.
+  worse than none. **v11.4** adds `subscribePlayback()`: "is sound coming out RIGHT NOW",
+  read off the element's own `playing`/`pause`/`ended`/`error`. Use it, not the queue's
+  `onOutcome` — that reports `"playing"` optimistically, before `play()` resolves, so a
+  refusal reaches the card within a beat. The `data:` guard in there is load-bearing:
+  `primeOnFirstGesture` PLAYS a silent clip, and without it the first tap anywhere on the
+  surface reads as speech.
 - `src/components/`:
+  - `Aurora.tsx` — **v11.4, the voice made visible.** A band of drifting colour along the
+    bottom edge, on for exactly as long as audio is playing. No caption, no control, no
+    container — the dock this replaced competed with Confirm / Approve & Save, and a
+    waveform at the bottom of a Samsung screen is the *listening* idiom, which is the one
+    thing this surface must not claim. `GAP_GRACE_MS` is why it does not strobe: a cue is
+    one frame per SENTENCE since v11.2. Renders `null` until something has actually been
+    spoken, so a voiceless run is the v10 surface exactly. CSS in `styles.css`
+    (`.aurora*`): fixed, z 40 (ABOVE `.saving`, because the goodbye is spoken over it),
+    `pointer-events: none` always, and gradients only — no blur, no backdrop-filter, no
+    mask. Gate: `node scripts/verify_aurora.mjs`. Design: `V11 · 1–3` in `goal-flow2.pen`.
   - `UnderstandingCard.tsx` — the **confirm-understanding gate**: renders the cloud's
     read (objective / constraints / thought) with "Confirm & plan" / "Decline" before the
     device plans. Driven by the `understanding` frame; answers with

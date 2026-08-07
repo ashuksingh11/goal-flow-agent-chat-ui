@@ -44,6 +44,7 @@ import { WorkingColumn } from "./components/WorkingColumn";
 import { UnderstandingCard } from "./components/UnderstandingCard";
 import { DevicePicker } from "./components/DevicePicker";
 import { CountdownRing } from "./components/CountdownRing";
+import { Aurora } from "./components/Aurora";
 import { Icon } from "./components/Icon";
 import { createGoalFlowSocket, getDeviceId, getGoalId, getRememberedDeviceId, rememberDeviceId } from "./lib/ws";
 import { primeOnFirstGesture } from "./lib/speech";
@@ -1648,6 +1649,13 @@ export default function App() {
           </div>
         </div>
       ) : null}
+
+      {/* v11.4 — the voice, given something to look at. Last in the tree and fixed to
+          the bottom of the VIEWPORT, so it is painted over the saving takeover above
+          rather than under it: cue 5, the goodbye, is spoken while that screen holds
+          the surface. It renders nothing at all until something has actually been
+          spoken, so a cloud with no voice is exactly the v10 surface. */}
+      <Aurora />
     </div>
   );
 }

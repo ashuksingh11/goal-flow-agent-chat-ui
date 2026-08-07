@@ -78,8 +78,66 @@ function audio(): HTMLAudioElement {
   if (element === null) {
     element = new Audio();
     element.preload = "auto";
+    attachPlaybackEvents(element);
   }
   return element;
+}
+
+/* ---------------------------------------------------------------------------
+ * IS SOUND ACTUALLY COMING OUT? (v11.4)
+ *
+ * The aurora is light that means "the Hub is talking", so it has to be tied to the
+ * one fact that is actually true — the element is producing audio — and NOT to any
+ * of the three things that merely look like it:
+ *
+ *   - the `speech` FRAME arriving: the audio may still be synthesising, and on a
+ *     blocked webview it will never play at all;
+ *   - `SpeechQueue.onOutcome("playing")`: reported OPTIMISTICALLY, before `play()`
+ *     has resolved, precisely so a refusal reaches the card within a beat. Light
+ *     bound to that glows for ~150ms for a voice that turns out to be blocked;
+ *   - `play()` resolving: that is playback STARTED, and says nothing about the end.
+ *
+ * So this subscribes to the element itself, and the element is the only thing that
+ * knows. `pause` is in the list because `stop()` — barge-in — pauses; a light that
+ * outlives the voice the user just silenced is worse than no light.
+ * ------------------------------------------------------------------------- */
+
+type PlaybackListener = (playing: boolean) => void;
+
+const playbackListeners = new Set<PlaybackListener>();
+let isPlaying = false;
+
+/**
+ * The priming clip is a data: URI (see primeOnFirstGesture), and it PLAYS — it has to,
+ * that is how it spends the gesture. Without this guard the first tap anywhere on the
+ * surface would flash the aurora for one frame of silence, which is the exact opposite
+ * of what the light is for: it would mean "speaking" at the one moment nothing is.
+ */
+function isRealUtterance(el: HTMLAudioElement): boolean {
+  return el.src !== "" && !el.src.startsWith("data:");
+}
+
+function attachPlaybackEvents(el: HTMLAudioElement): void {
+  const announce = (next: boolean) => {
+    if (next === isPlaying) return;
+    isPlaying = next;
+    for (const listener of playbackListeners) listener(next);
+  };
+  el.addEventListener("playing", () => announce(isRealUtterance(el)));
+  el.addEventListener("pause", () => announce(false));
+  el.addEventListener("ended", () => announce(false));
+  el.addEventListener("error", () => announce(false));
+}
+
+/** Subscribe to "there is sound coming out right now". Fires immediately with the
+ *  current truth, so a late subscriber never misses an utterance already in flight. */
+export function subscribePlayback(listener: PlaybackListener): () => void {
+  audio(); // the element is the source of these events; make sure it exists
+  playbackListeners.add(listener);
+  listener(isPlaying);
+  return () => {
+    playbackListeners.delete(listener);
+  };
 }
 
 /**
