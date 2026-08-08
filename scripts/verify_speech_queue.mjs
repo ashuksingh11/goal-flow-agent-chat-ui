@@ -171,6 +171,20 @@ check(!/localStorage\.getItem\(SPOKEN_KEY|localStorage\.setItem\(SPOKEN_KEY/.tes
 check(/SPOKEN_LIMIT/.test(app),
   "the persisted list must be bounded");
 
+// --- v11.9: a superseded webview goes quiet -------------------------------------------
+//
+// The cloud now closes an older chat socket with 1012 when a newer one binds, which
+// stops it being SENT anything. That is necessary and not sufficient: on a Hub the
+// document can stay alive, backgrounded, still holding an audio element mid-sentence.
+// Reported there — press Approve, hear it twice, cloud logging chat_surfaces=2.
+const ws = readFileSync(join(here, "../src/lib/ws.ts"), "utf8");
+check(/onReplaced/.test(ws),
+  "lib/ws.ts must surface the 1012 replacement — a webview the Hub replaced but did not destroy has to be told");
+check(/subscriber\.onReplaced\?\.\(\)/.test(ws),
+  "and notify subscribers on that close, before returning without a reconnect");
+check(/onReplaced:\s*\(\)\s*=>\s*speechQueueRef\.current\?\.clear\(\)/.test(app),
+  "App must STOP the voice when superseded — the cloud can stop sending to a stale surface but cannot stop what it is already playing");
+
 // --- barge-in must not eat its own button --------------------------------------------
 check(/closest\?\.\(["'`]\.speak-chip/.test(app),
   "barge-in must EXEMPT .speak-chip: the listener is on capture, so without this the tap clears the queue before the chip's own handler asks it to replay — and the one button whose job is to make audio happen silently does nothing");

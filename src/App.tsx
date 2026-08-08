@@ -1153,6 +1153,22 @@ export default function App() {
       onMessage: (message) => dispatch({ type: "recv", message }),
       onSent: (message) => dispatch({ type: "sent", message }),
       onStateChange: setConnection,
+      /*
+       * v11.9 — this webview has been replaced by a newer one, and it may not be dead.
+       *
+       * On a Family Hub the document's lifetime belongs to native Bixby: a previous
+       * webview can stay alive, backgrounded and still holding an audio element that is
+       * mid-sentence. The cloud now evicts the older chat socket (1012), which stops it
+       * being SENT anything — necessary, and not sufficient, because what it is already
+       * playing keeps playing and the room hears two voices.
+       *
+       * Reported from a Hub: press Approve and the audio comes twice, with the cloud
+       * logging `chat_surfaces=2` on the tap. So a superseded surface goes quiet on the
+       * spot, and stays quiet: the queue is cleared, and nothing further can arrive to
+       * refill it because the socket is closed and 1012 is the one code we never
+       * reconnect from.
+       */
+      onReplaced: () => speechQueueRef.current?.clear(),
     });
     socketRef.current = socket;
     socket.connect();

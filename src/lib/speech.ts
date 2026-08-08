@@ -247,9 +247,39 @@ export function whenEnded(): Promise<void> {
   });
 }
 
-/** Stop whatever is speaking. Called when the gate is answered — see App.tsx. */
+/**
+ * Stop whatever is speaking, and leave NOTHING for the platform to resume.
+ *
+ * This used to be `pause()` followed by `currentTime = 0`, and that rewind is the prime
+ * suspect for a Tizen-only report: on the Hub, any gesture — a tap on Confirm, a tap on
+ * Include, even a touch-SCROLL — makes the last utterance play again from the beginning.
+ *
+ * The reasoning, and it is a hypothesis until the Hub's log confirms it. Barge-in fires
+ * on every `pointerdown`, so every gesture ran this function. On a finished utterance
+ * `pause()` is a no-op and `currentTime = 0` un-ends the element and seeks it back to
+ * the start: a fully loaded, decoded resource sitting at frame zero, waiting. Chrome
+ * leaves it sitting there, which is why Ubuntu never showed this. An older WebView,
+ * evaluating a media element that was just seeked INSIDE a user gesture, has every
+ * reason to treat that as the activation it was waiting for and start playing. The
+ * gesture meant to silence the voice becomes the gesture that authorises it.
+ *
+ * So: do not rewind, and do not keep the resource. `removeAttribute("src")` + `load()`
+ * is the standard way to abandon a media resource — after it there is no source to
+ * resume, no buffer to replay, and no seek position to honour. The next utterance
+ * assigns a fresh src, which is what `play()` does anyway.
+ *
+ * Guarded on there being something loaded: barge-in calls this on EVERY pointer down,
+ * and re-running the resource selection algorithm on an already-empty element each time
+ * is pointless work on a device with none to spare.
+ */
 export function stop(): void {
-  if (element === null) return;
-  element.pause();
-  element.currentTime = 0;
+  const el = element;
+  if (el === null) return;
+  el.pause();
+  if (el.src) {
+    el.removeAttribute("src");
+    // Abandons the current resource. Fires `emptied`; `whenEnded()` is already resolved
+    // by the `pause` above, so nothing is left waiting on it.
+    el.load();
+  }
 }
