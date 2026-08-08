@@ -39,6 +39,16 @@ type PlanMorph = { prevTitle: string; prevDetail?: string };
 
 export interface PlanCardProps {
   plan: PresentPlan;
+  /**
+   * v11.1: the state of the voice, when it is speaking about THIS card.
+   *
+   * Only "blocked" renders anything — the tap that a browser's autoplay refusal makes
+   * necessary. See UnderstandingCard for the same treatment and lib/speech.ts for why
+   * a refusal is ordinary rather than exceptional.
+   */
+  speech?: "idle" | "playing" | "blocked" | "unavailable";
+  /** Play the pending utterance from inside a real click. */
+  onPlaySpeech?: () => void;
   /** Ids changed by the most recent approved daily adaptation — highlighted. */
   changedIds?: string[];
   /** Previous row copy captured before the adapted plan replaced it. */
@@ -146,6 +156,8 @@ export function PlanCard({
   composedMs = null,
   proposalStatuses,
   onDecide,
+  speech = "idle",
+  onPlaySpeech,
 }: PlanCardProps) {
   const { payload } = plan;
   const changed = useMemo(() => new Set(changedIds), [changedIds]);
@@ -167,6 +179,35 @@ export function PlanCard({
       block: "center",
     });
   }, [morphSeq, firstChangedId]);
+
+  /*
+   * v11.2 — BRING THE APPROVALS INTO VIEW WHEN THE PLAN LANDS.
+   *
+   * The voice says "two things need your approval" and the buttons were below the fold:
+   * a full week of plan rows sits between the card's heading and its approvals, so the
+   * one thing the user was just ASKED to do was the one thing not on screen. Being told
+   * to act and having to hunt for the control is worse than not being told.
+   *
+   * Scrolls to the approvals rather than the page bottom, and `block: "nearest"` so a
+   * short plan whose approvals are already visible does not jump at all. Runs once per
+   * plan (keyed on the goal), never on a re-render — and never for a plan with nothing
+   * to approve, where there is nothing to bring into view.
+   */
+  const approvalsRef = useRef<HTMLDivElement | null>(null);
+  const needsApproval = payload.proposals.some((p) => p.requires_approval !== false && p.tier !== "auto");
+  useEffect(() => {
+    if (!needsApproval || !approvalsRef.current) return;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // A frame's delay: the card has only just mounted, and scrolling to an element
+    // whose siblings are still laying out lands in the wrong place.
+    const timer = window.setTimeout(() => {
+      approvalsRef.current?.scrollIntoView({
+        behavior: reducedMotion ? "auto" : "smooth",
+        block: "nearest",
+      });
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [plan.goal_id, needsApproval]);
 
   const knewChips = payload.knew
     ? Object.entries(payload.knew)
@@ -199,6 +240,16 @@ export function PlanCard({
             {composedMs !== null ? ` · ${composedIn(composedMs)}` : ""}
           </p>
         </div>
+        {/* v11.1 — the same affordance the confirm gate has, for the same reason: the
+            browser may have refused to autoplay and only a tap can undo that. The plan
+            is the one utterance carrying something the screen cannot say as quickly —
+            what this week actually IS — so it is worth offering twice. */}
+        {speech === "blocked" ? (
+          <button type="button" className="speak-chip" onClick={onPlaySpeech}>
+            <Icon name="speaker" size={18} />
+            Hear this
+          </button>
+        ) : null}
         {payload.explanation ? (
           <details className="result__why">
             <summary className="result__why-summary">
@@ -364,11 +415,13 @@ export function PlanCard({
         </p>
       ) : null}
 
-      <ProposalList
-        proposals={payload.proposals}
-        statuses={proposalStatuses}
-        onDecide={onDecide}
-      />
+      <div ref={approvalsRef}>
+        <ProposalList
+          proposals={payload.proposals}
+          statuses={proposalStatuses}
+          onDecide={onDecide}
+        />
+      </div>
     </article>
   );
 }

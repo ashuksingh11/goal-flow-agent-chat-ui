@@ -503,6 +503,38 @@ export interface Understanding {
   payload: UnderstandingPayload;
 }
 
+// ---------------------------------------------------------------------------
+// speech (cloud → ui) — v11
+// ---------------------------------------------------------------------------
+
+export interface SpeechPayload {
+  /** Deterministic per (goal_id, cue) — a replay resolves to the same audio. */
+  utterance_id: string;
+  /** Which moment this speaks for. "understanding" is the only cue in v11. */
+  cue: string;
+  /** The spoken words verbatim: the caption, and all that is left if audio fails. */
+  text: string;
+  /**
+   * A PATH — "/speech/<id>.mp3" — never an absolute URL. The cloud does not know
+   * which host:port this UI reached it on, so the origin is resolved here (see
+   * lib/speech.ts:speechUrl) against the socket we are already connected on.
+   */
+  url: string;
+}
+
+/**
+ * Cloud → ui: say this out loud. Arrives immediately AFTER the frame it speaks for,
+ * so the card is always on screen before the voice describes it.
+ *
+ * Absent entirely when the cloud has no TTS key — "no voice" is a normal state, and
+ * every screen here is complete and answerable in silence.
+ */
+export interface Speech {
+  type: "speech";
+  goal_id: string;
+  payload: SpeechPayload;
+}
+
 export interface UnderstandingResponsePayload {
   confirmed: boolean;
   /**
@@ -722,6 +754,7 @@ export type ContractMessage =
   | PresentPlan
   | Understanding
   | UnderstandingResponse
+  | Speech
   | Approval
   | Proposal
   | Status
@@ -759,6 +792,7 @@ export type UiInboundMessage =
   | Capabilities
   | AgentEvent
   | Understanding
+  | Speech
   | PresentPlan
   | Proposal
   | Status

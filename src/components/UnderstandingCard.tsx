@@ -198,6 +198,19 @@ export function UnderstandingCard({
             count the chips below already make, and a promise about the next screen. The
             one fact in it that appeared nowhere else was the window, in ISO. */}
         {covers && !captureOnly ? <p className="confirm-card__covers">{covers}</p> : null}
+
+        {/* v11.2 — NO AUDIO AFFORDANCE ON THIS CARD, deliberately.
+
+            v11 put a "Hear this" chip here for a browser that refuses to autoplay. It is
+            gone because this is the DECISION screen: the card's whole job is to collect a
+            confirm or a decline, and a third control competes with the two that matter.
+            The voice is a courtesy here, not the content — everything it says is written
+            on the card the reader is already looking at.
+
+            The affordance survives where it earns its place: PlanCard, whose utterance
+            carries the one thing the screen cannot say as quickly, which is what this
+            week actually IS. `speech`/`onPlaySpeech` stay in the props so App keeps one
+            wiring path and bringing it back needs no plumbing. */}
       </header>
 
       {chips.length > 0 ? (

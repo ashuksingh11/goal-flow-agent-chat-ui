@@ -44,8 +44,12 @@ import { WorkingColumn } from "./components/WorkingColumn";
 import { UnderstandingCard } from "./components/UnderstandingCard";
 import { DevicePicker } from "./components/DevicePicker";
 import { CountdownRing } from "./components/CountdownRing";
+import { Aurora } from "./components/Aurora";
 import { Icon } from "./components/Icon";
 import { createGoalFlowSocket, getDeviceId, getGoalId, getRememberedDeviceId, rememberDeviceId } from "./lib/ws";
+import { primeOnFirstGesture } from "./lib/speech";
+import type { PlaybackOutcome } from "./lib/speech";
+import { SpeechQueue } from "./lib/speechQueue";
 import type { ConnectionState, GoalFlowSocket } from "./lib/ws";
 import type {
   AgentEvent,
@@ -55,6 +59,7 @@ import type {
   DeviceInfo,
   PresentPlan,
   Proposal,
+  Speech,
   Status,
   Understanding,
   UiInboundMessage,
@@ -96,6 +101,23 @@ interface UiState {
   working: boolean;
   /** Pre-planning confirmation gate from the cloud. */
   understanding: Understanding | null;
+  /**
+   * v11: what the cloud wants said out loud, APPEND-ONLY.
+   *
+   * EMPTY IS THE NORMAL CASE, not an error state — a cloud with no TTS key never sends
+   * a frame at all, and every screen here is complete and answerable in silence.
+   *
+   * v11.1 — AND IT IS A LIST BECAUSE A SINGLE SLOT SILENTLY LOST UTTERANCES. The cloud
+   * emits `plan` and `approvals` back-to-back on one screen; React batches both into a
+   * single re-render, so an effect keyed on a `Speech | null` only ever observed the
+   * SECOND one and the plan summary was never spoken. It reproduced on every live run
+   * and on none of the headless ones, because the headless client has no reducer.
+   *
+   * Appending keeps the reducer's create-phase filtering (stale goal ids, declined
+   * goals) while making "two frames in one tick" representable. Cleared wherever the
+   * gate is cleared — a voice outliving its screen describes something not there.
+   */
+  speech: Speech[];
   /**
    * The goal in words, for the goal bar — WHAT THE USER SAID, not what the agent made
    * of it. This surface never SENDS `user_goal` (v4.1 — Bixby owns goal entry), so the
@@ -204,6 +226,7 @@ const INITIAL_STATE: UiState = {
   phase: null,
   working: false,
   understanding: null,
+  speech: [],
   goalText: "",
   declinedGoalId: null,
   modules: null,
@@ -276,9 +299,60 @@ type UiAction =
  * end, 2.2 s ended abruptly: the eye reaches the sentence about the Family Hub taking over
  * roughly when the screen goes.
  */
-const MIN_SAVING_MS = 3800;
+/*
+ * v11.2: 3800 -> 5200, tracking the cloud's 4.5s and leaving room for the voice.
+ *
+ * The saving screen now speaks, and it was closing mid-sentence. Measured on the `saved`
+ * cue in the demo voice: the first chunk is ready 1.4s after the approval and the whole
+ * line runs 3.2s, so the voice finishes at ~4.6s while this floor let the surface go at
+ * 3.8s. It stays ABOVE the cloud's dwell for the reason it always has — the cloud closes
+ * the bracket and this side must already be willing to hold, or the two race.
+ */
+const MIN_SAVING_MS = 5200;
 
 const MAX_TICKS = 40;
+
+/* ---------------------------------------------------------------------------
+ * WHAT THIS DOCUMENT HAS ALREADY SAID OUT LOUD (v11.8).
+ *
+ * The in-memory Set is enough for a webview that lives once. It is not enough on a
+ * Family Hub, where the webview's lifetime belongs to native Bixby: reported from a
+ * real Hub and NOT reproducible on Ubuntu, the voice repeats after a tap. A reload of
+ * the webview slot gives a fresh document with an empty Set, the socket rebinds, and
+ * the cloud replays the create-phase speech — correctly, for a surface it has every
+ * reason to think is new.
+ *
+ * `sessionStorage`, deliberately, and the choice is the whole point:
+ *   - it SURVIVES a reload of the same webview slot, which is the bug;
+ *   - it does NOT survive a genuinely new surface, so the cloud's replay still serves
+ *     the case it exists for — a webview that binds mid-gate hears the question.
+ * localStorage would silence that second case forever, which is worse than the bug.
+ *
+ * Bounded, because a webview that somehow lives a long time should not grow a list
+ * forever. Newest-last: an utterance is only at risk of repeating while its screen is
+ * still up, so the oldest ids are the ones safe to forget.
+ * ------------------------------------------------------------------------- */
+const SPOKEN_KEY = "goalflow:spoken";
+const SPOKEN_LIMIT = 60;
+
+function loadSpokenIds(): Set<string> {
+  try {
+    const raw = window.sessionStorage.getItem(SPOKEN_KEY);
+    return new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    // A webview with storage disabled still works; it just loses the reload guard.
+    return new Set<string>();
+  }
+}
+
+function rememberSpoken(ids: Set<string>): void {
+  try {
+    const kept = Array.from(ids).slice(-SPOKEN_LIMIT);
+    window.sessionStorage.setItem(SPOKEN_KEY, JSON.stringify(kept));
+  } catch {
+    /* Storage full or blocked: the in-memory Set still guards this document. */
+  }
+}
 
 /** agent_event → live stream entries (the "watch it think" reduction). */
 function reduceAgentEvent(state: UiState, event: AgentEvent): UiState {
@@ -495,6 +569,7 @@ function closeCreatePhase(state: UiState): UiState {
     ...state,
         activeGoalId: null,
         understanding: null,
+        speech: [],
         goalText: "",
         phase: null,
         working: false,
@@ -606,6 +681,14 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         phase: maxRailPhase(withGoal.phase, "confirming"),
       };
 
+    case "speech":
+      // v11. Arrives immediately after the `understanding` it speaks for, so by here
+      // the card is already in state and the effect below can play against a gate the
+      // user can see. Stored rather than played from the reducer because the reducer is
+      // PURE — audio is an effect, and putting it here would make replaying state
+      // impossible to reason about.
+      return { ...withGoal, speech: [...withGoal.speech, message] };
+
     case "notice":
       // v7: NOT every notice is terminal. "updating_goals" arrives mid-save, while the
       // saving screen is deliberately still up, and says what the cloud is doing to the
@@ -631,6 +714,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         declinedClosesIn: message.closes_in_s ?? null,
         declinedGoalId: message.goal_id,
         understanding: null,
+        speech: [],
         goalText: "",
         phase: null,
         working: false,
@@ -674,6 +758,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
         declined: null,
         declinedClosesIn: null,
         understanding: null,
+        speech: [],
         // v7.4: the open now carries what the user SAID, and it arrives ~10-60s before
         // the understanding does. Without it the bar reads "Waiting for a goal…" for the
         // whole interpretation — while the goal it is waiting for is the one being read.
@@ -717,6 +802,7 @@ function reduceInbound(state: UiState, message: UiInboundMessage): UiState {
       return {
         ...withGoal,
         understanding: null,
+        speech: [],
         plan: message,
         pristinePlan: message,
         working: false,
@@ -906,6 +992,7 @@ function reducer(state: UiState, action: UiAction): UiState {
         return {
           ...state,
           understanding: null,
+          speech: [],
           activeGoalId: action.goalId,
           phase: maxRailPhase(state.phase, "planning"),
           working: true,
@@ -920,6 +1007,7 @@ function reducer(state: UiState, action: UiAction): UiState {
         ],
         activeGoalId: null,
         understanding: null,
+        speech: [],
         goalText: "",
         declinedGoalId: action.goalId,
         phase: null,
@@ -1065,6 +1153,22 @@ export default function App() {
       onMessage: (message) => dispatch({ type: "recv", message }),
       onSent: (message) => dispatch({ type: "sent", message }),
       onStateChange: setConnection,
+      /*
+       * v11.9 — this webview has been replaced by a newer one, and it may not be dead.
+       *
+       * On a Family Hub the document's lifetime belongs to native Bixby: a previous
+       * webview can stay alive, backgrounded and still holding an audio element that is
+       * mid-sentence. The cloud now evicts the older chat socket (1012), which stops it
+       * being SENT anything — necessary, and not sufficient, because what it is already
+       * playing keeps playing and the room hears two voices.
+       *
+       * Reported from a Hub: press Approve and the audio comes twice, with the cloud
+       * logging `chat_surfaces=2` on the tap. So a superseded surface goes quiet on the
+       * spot, and stays quiet: the queue is cleared, and nothing further can arrive to
+       * refill it because the socket is closed and 1012 is the one code we never
+       * reconnect from.
+       */
+      onReplaced: () => speechQueueRef.current?.clear(),
     });
     socketRef.current = socket;
     socket.connect();
@@ -1114,6 +1218,199 @@ export default function App() {
    * ring FREEZES on pointer-down, because a ring that keeps draining while the close is
    * already underway is promising seconds that no longer exist.
    */
+  /*
+   * v11 — the voice, and the fact that we may not be allowed to use it.
+   *
+   * `speechState` is what the CARD renders, and the states are not decorative:
+   *   "idle"        — nothing to say (the usual case: a cloud with no TTS key)
+   *   "playing"     — it spoke, or is speaking. Show that it did.
+   *   "blocked"     — the browser refused for want of a user gesture. OFFER THE TAP:
+   *                   this is a working voice waiting for permission, and the ONE
+   *                   state that must be visible, because only the user can resolve it.
+   *   "unavailable" — the audio itself failed. Stay quiet; the card is complete.
+   *
+   * See lib/speech.ts for why "blocked" is a normal outcome on a Hub webview rather
+   * than an error we could engineer away.
+   */
+  const [speechState, setSpeechState] = useState<"idle" | PlaybackOutcome>("idle");
+  /**
+   * v11.1 — WHAT is speaking, not just whether. With five cues the card can no longer
+   * assume an utterance is about itself: the plan summary and the approvals line both
+   * land while PlanCard is up, and the understanding chip must not offer to replay a
+   * sentence about the plan.
+   */
+  const [speechCue, setSpeechCue] = useState<string | null>(null);
+
+  // Spend the first gesture this document gets — whatever it was for — on unlocking
+  // audio. A user who taps anything at all then never meets the fallback button.
+  useEffect(() => primeOnFirstGesture(), []);
+
+  /**
+   * ONE QUEUE for the surface's lifetime. Built in a ref rather than per-render because
+   * it holds the pending utterances and the generation counter — a queue rebuilt on
+   * render would forget what it was saying mid-sentence.
+   */
+  const speechQueueRef = useRef<SpeechQueue | null>(null);
+  if (speechQueueRef.current === null) {
+    speechQueueRef.current = new SpeechQueue({
+      onOutcome: (outcome, payload) => {
+        setSpeechState(outcome);
+        setSpeechCue(payload?.cue ?? null);
+      },
+    });
+  }
+
+  /**
+   * Every inbound utterance is OFFERED to the queue, which decides whether it plays now,
+   * waits, cuts something off, or is dropped. The policy lives in lib/speechQueue.ts,
+   * deliberately, and not in a component.
+   *
+   * DRAINS A LIST rather than reacting to one value, and the cursor is the reason: React
+   * batches, so `plan` and `approvals` — emitted back-to-back by the cloud — arrive in a
+   * single render. An effect that read one slot saw only the second and the plan summary
+   * was never spoken at all. Reproduced on every live run; invisible to every headless
+   * test, because a headless client has no reducer to batch.
+   */
+  /*
+   * v11.6 — AND NOTHING IS EVER SPOKEN TWICE.
+   *
+   * The cursor alone is not enough, because the same utterance can legitimately arrive
+   * again. The socket reconnects on any non-1012 close and re-sends `hello`; the cloud
+   * answers a fresh bind with `_replay_create_phase`, which deliberately replays the
+   * `understanding`, `plan` and `approvals` speech so a webview that binds mid-gate
+   * still hears the question. That is right for a NEW webview and wrong for this one —
+   * a document that already spoke those lines gets them again, and the voice repeats
+   * itself minutes later at an untouched approval screen. Reported from a real run:
+   * leave the approvals up and it starts talking again.
+   *
+   * The fix belongs here rather than in the cloud, which cannot tell a reconnecting
+   * socket from a new surface. `utterance_id` is deterministic per (goal_id, cue) and
+   * per sentence within it (`<cue>` then `<cue>-1`, `<cue>-2`…), so it identifies the
+   * utterance exactly. The set lives as long as the document; a genuinely new webview
+   * is a new document with an empty set, so the replay still works for the case it was
+   * built for.
+   *
+   * This does NOT block the "Hear this" replay — that calls queue.retry(), which
+   * re-plays what the queue is already holding rather than pushing a new frame.
+   *
+   * v11.7 — AND THE POSITIONAL CURSOR IS GONE, because it was silently eating the plan.
+   *
+   * There used to be a `spokenCursor` index alongside this, draining
+   * `state.speech.slice(cursor)`. An index is only meaningful while the array it points
+   * into grows monotonically, and `state.speech` does NOT: the reducer resets it to []
+   * on `present_plan` (and on five other transitions). The guard for that was
+   * `if (length < cursor) cursor = 0`, which is right only when the replacement array is
+   * SHORTER.
+   *
+   * Measured on a real run: cursor sits at 3 after understanding + working_start +
+   * working_plan; `present_plan` clears the list and the three frames that follow it in
+   * the same React batch (plan, plan-1, approvals) bring the length back to exactly 3.
+   * `3 < 3` is false, the cursor stays at 3, `slice(3)` is empty — and the entire plan
+   * narration and the approvals line are never spoken. It depends on how many SENTENCES
+   * the earlier cues split into, which is why it presents as "sometimes the plan audio
+   * doesn't come".
+   *
+   * Identity replaces position. The set above already knows what has been spoken, so
+   * scanning the whole list costs one Set lookup per frame (there are single digits of
+   * them) and cannot be confused by the array being replaced underneath it.
+   */
+  const spokenIds = useRef(loadSpokenIds());
+  useEffect(() => {
+    for (const frame of state.speech) {
+      if (spokenIds.current.has(frame.payload.utterance_id)) continue;
+      spokenIds.current.add(frame.payload.utterance_id);
+      rememberSpoken(spokenIds.current);
+      speechQueueRef.current?.push(frame.payload);
+    }
+  }, [state.speech]);
+
+  // The goal changed, or the surface reset: abandon everything queued. Those utterances
+  // were about a moment that has passed, and the create-phase bracket is exactly the
+  // boundary they must not cross.
+  useEffect(() => {
+    return () => speechQueueRef.current?.clear();
+  }, [state.activeGoalId]);
+
+  /**
+   * BARGE-IN (rule 5). A TAP anywhere on this surface stops the voice. A scroll does not.
+   *
+   * Someone who is acting does not need to be talked at, and a fridge that keeps
+   * narrating over a person's decision is not assisting them — it is competing. Bound
+   * once at the document, capture phase, so it fires before any component's own handler
+   * and no button has to remember to do this.
+   *
+   * v11.10 — A SCROLL IS NOT A DECISION, IT IS READING.
+   *
+   * This used to hush on `pointerdown` alone, and on a touch panel that is every scroll:
+   * touch-scrolling begins with a pointerdown. On a fridge with a seven-day plan,
+   * scrolling is constant, and someone scrolling the plan while the voice describes it is
+   * ENGAGED, not dismissing — silencing them is the exact opposite of what this rule is
+   * for.
+   *
+   * It went unnoticed for two versions because both environments hid it differently:
+   * desktop scrolling is a WHEEL event, which fires no pointerdown at all, so Ubuntu
+   * never ran this; and on the Hub the platform immediately restarted the audio this had
+   * just stopped (see lib/speech.ts), so the stop was invisible underneath the repeat it
+   * caused. Fixing that repeat is what finally made this visible.
+   *
+   * So the decision moves to pointer-UP, and only if the pointer never travelled: the
+   * standard tap-versus-drag test. Barge-in is about intent, and intent is not knowable
+   * at pointerdown — a press that turns into a scroll and a press that turns into a tap
+   * are the same event until one of them moves. The ~100ms this costs is imperceptible
+   * for silencing a voice; it would not be acceptable for a visual press state, which is
+   * why THAT still happens on pointerdown (see .btn:active).
+   */
+  useEffect(() => {
+    /** How far a pointer may travel and still count as a tap. The conventional ~10px. */
+    const TAP_SLOP_PX = 10;
+    /** The in-flight press, or null once it has been disqualified or consumed. */
+    let candidate: { id: number; x: number; y: number } | null = null;
+
+    const down = (event: PointerEvent) => {
+      // EXCEPT the control that exists to start the voice. This listener is on capture,
+      // so it runs BEFORE the chip's own click handler — without this guard, tapping
+      // "Hear this" would clear the queue and then ask it to replay an empty queue,
+      // and the one button whose entire job is to make audio happen would be the one
+      // button that silently does nothing.
+      if ((event.target as Element | null)?.closest?.(".speak-chip")) {
+        candidate = null;
+        return;
+      }
+      candidate = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    };
+
+    const move = (event: PointerEvent) => {
+      if (candidate === null || event.pointerId !== candidate.id) return;
+      const travelled = Math.hypot(event.clientX - candidate.x, event.clientY - candidate.y);
+      // Moved: this is a scroll or a drag, and the voice keeps talking.
+      if (travelled > TAP_SLOP_PX) candidate = null;
+    };
+
+    const up = (event: PointerEvent) => {
+      if (candidate === null || event.pointerId !== candidate.id) return;
+      candidate = null;
+      speechQueueRef.current?.clear();
+    };
+
+    // A cancelled pointer (the browser took it for a gesture, the touch left the
+    // surface) is not a tap either.
+    const cancel = () => {
+      candidate = null;
+    };
+
+    const opts = { capture: true } as const;
+    window.addEventListener("pointerdown", down, opts);
+    window.addEventListener("pointermove", move, opts);
+    window.addEventListener("pointerup", up, opts);
+    window.addEventListener("pointercancel", cancel, opts);
+    return () => {
+      window.removeEventListener("pointerdown", down, opts);
+      window.removeEventListener("pointermove", move, opts);
+      window.removeEventListener("pointerup", up, opts);
+      window.removeEventListener("pointercancel", cancel, opts);
+    };
+  }, []);
+
   const [closingRefusal, setClosingRefusal] = useState(false);
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [runEndedAt, setRunEndedAt] = useState<number | null>(null);
@@ -1453,6 +1750,10 @@ export default function App() {
                 composedMs={
                   runStartedAt !== null && runEndedAt !== null ? runEndedAt - runStartedAt : null
                 }
+                // v11.1: the plan and its approvals both speak on this screen, so the
+                // chip belongs here too when either is blocked.
+                speech={speechCue === "plan" || speechCue === "approvals" ? speechState : "idle"}
+                onPlaySpeech={() => speechQueueRef.current?.retry()}
                 proposalStatuses={state.proposalStatuses}
                 onDecide={(decisions) =>
                   sendDecisions(state.plan!.goal_id, state.plan!.correlation_id, decisions)
@@ -1508,6 +1809,13 @@ export default function App() {
           </div>
         </div>
       ) : null}
+
+      {/* v11.4 — the voice, given something to look at. Last in the tree and fixed to
+          the bottom of the VIEWPORT, so it is painted over the saving takeover above
+          rather than under it: cue 5, the goodbye, is spoken while that screen holds
+          the surface. It renders nothing at all until something has actually been
+          spoken, so a cloud with no voice is exactly the v10 surface. */}
+      <Aurora />
     </div>
   );
 }

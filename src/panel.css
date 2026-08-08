@@ -219,6 +219,54 @@
   font-weight: 500;
   color: var(--ink-quiet);
 }
+/* v11 — the voice.
+
+   "Hear this" is the ONLY thing on this card that appears because something went
+   wrong, and it must not look like it. A browser refusing to autoplay is ordinary on a
+   webview, the user did nothing, and there is nothing to apologise for — so this is a
+   quiet accent chip in the card's own language, not a warning. It is also a real touch
+   target on a fridge door: 44px tall, self-aligned so it never stretches to the header's
+   full width. */
+.speak-chip {
+  align-self: flex-start;
+  margin-top: 0.55rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 44px;
+  padding: 0 0.95rem;
+  border: 1px solid var(--accent-soft);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  cursor: pointer;
+}
+.speak-chip:hover { filter: brightness(0.97); }
+.speak-chip:active { transform: translateY(1px); }
+
+/* Playing: a MARK, not a control. It says "that was read out", which matters on a
+   surface where the audio may have started while the user was looking elsewhere — and
+   it must not invite a tap that would only restart the sentence. */
+.speak-mark {
+  align-self: flex-start;
+  margin-top: 0.4rem;
+  display: inline-flex;
+  color: var(--ink-quiet);
+  /* Two slow pulses, then still. A permanent animation beside safety-critical
+     constraint rows would pull the eye off them for as long as the card is up. */
+  animation: speak-pulse 1.4s var(--p-ease-out) 2 both;
+}
+@keyframes speak-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .speak-mark { animation: none; opacity: 0.7; }
+}
+
 .confirm-card__thought {
   margin: 0;
   font-size: var(--fs-lead);

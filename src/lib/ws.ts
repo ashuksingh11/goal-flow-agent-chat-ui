@@ -35,6 +35,9 @@ const INBOUND_TYPES = new Set([
   "capabilities",
   "agent_event",
   "understanding",
+  // v11: the voice. Absent from this list the frame is dropped in silence, which for a
+  // feature whose failure mode IS silence would be undebuggable.
+  "speech",
   "present_plan",
   "proposal",
   "status",
@@ -63,6 +66,19 @@ export interface GoalFlowSocketOptions {
   onSent?: (message: UiOutboundMessage) => void;
   /** Called on connection state changes (drives the header indicator). */
   onStateChange?: (state: ConnectionState) => void;
+  /**
+   * The cloud closed this socket with 1012 — a NEWER chat webview has taken the slot.
+   *
+   * v11.9, and it exists because a replaced webview is not necessarily a dead one. On a
+   * Family Hub the document's lifetime belongs to native Bixby: it can be replaced,
+   * backgrounded and still running, still holding an audio element that is mid-sentence.
+   * The cloud stops sending to it, which is necessary and not sufficient — what it is
+   * already playing keeps playing, and the room hears two voices.
+   *
+   * So a superseded surface is told, and goes quiet. The socket layer knows the code;
+   * what "quiet" means is App's business, not this module's.
+   */
+  onReplaced?: () => void;
 }
 
 export interface GoalFlowSocket {
@@ -101,6 +117,17 @@ function getConfiguredUrl() {
     return `${proto}://${window.location.hostname}:${port}/ws`;
   }
   return FALLBACK_WS_URL;
+}
+
+/**
+ * Where the hub is, as a URL — the resolution above, exposed.
+ *
+ * v11: `lib/speech.ts` needs the hub's HTTP origin to fetch audio, and this is the only
+ * place that knows it. Deriving it a second time there would be two rules for one fact,
+ * and the one that drifts would be the one nobody is watching.
+ */
+export function getSocketUrl(): string {
+  return sharedUrl ?? getConfiguredUrl();
 }
 
 /**
@@ -174,7 +201,10 @@ function isUiInboundMessage(value: unknown): value is UiInboundMessage {
 // Shared (module-level) connection state — the tab-wide singleton.
 // ---------------------------------------------------------------------------
 
-type Subscriber = Pick<GoalFlowSocketOptions, "onMessage" | "onSent" | "onStateChange">;
+type Subscriber = Pick<
+  GoalFlowSocketOptions,
+  "onMessage" | "onSent" | "onStateChange" | "onReplaced"
+>;
 
 const subscribers = new Set<Subscriber>();
 let sharedSocket: WebSocket | null = null;
@@ -276,6 +306,9 @@ function openSharedSocket() {
     // the newer socket right back → endless mutual-eviction storm. Let the
     // newest socket own the slot; reconnect only on other closes (1006 &c).
     if (event.code === 1012) {
+      // Superseded. Tell the app so it can stop anything it is still playing — a
+      // webview the Hub has replaced but not destroyed must not keep talking.
+      for (const subscriber of subscribers) subscriber.onReplaced?.();
       return;
     }
     scheduleReconnect();
