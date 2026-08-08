@@ -1332,25 +1332,83 @@ export default function App() {
   }, [state.activeGoalId]);
 
   /**
-   * BARGE-IN (rule 5). Any tap anywhere on this surface stops the voice.
+   * BARGE-IN (rule 5). A TAP anywhere on this surface stops the voice. A scroll does not.
    *
    * Someone who is acting does not need to be talked at, and a fridge that keeps
    * narrating over a person's decision is not assisting them — it is competing. Bound
    * once at the document, capture phase, so it fires before any component's own handler
    * and no button has to remember to do this.
+   *
+   * v11.10 — A SCROLL IS NOT A DECISION, IT IS READING.
+   *
+   * This used to hush on `pointerdown` alone, and on a touch panel that is every scroll:
+   * touch-scrolling begins with a pointerdown. On a fridge with a seven-day plan,
+   * scrolling is constant, and someone scrolling the plan while the voice describes it is
+   * ENGAGED, not dismissing — silencing them is the exact opposite of what this rule is
+   * for.
+   *
+   * It went unnoticed for two versions because both environments hid it differently:
+   * desktop scrolling is a WHEEL event, which fires no pointerdown at all, so Ubuntu
+   * never ran this; and on the Hub the platform immediately restarted the audio this had
+   * just stopped (see lib/speech.ts), so the stop was invisible underneath the repeat it
+   * caused. Fixing that repeat is what finally made this visible.
+   *
+   * So the decision moves to pointer-UP, and only if the pointer never travelled: the
+   * standard tap-versus-drag test. Barge-in is about intent, and intent is not knowable
+   * at pointerdown — a press that turns into a scroll and a press that turns into a tap
+   * are the same event until one of them moves. The ~100ms this costs is imperceptible
+   * for silencing a voice; it would not be acceptable for a visual press state, which is
+   * why THAT still happens on pointerdown (see .btn:active).
    */
   useEffect(() => {
-    const hush = (event: PointerEvent) => {
+    /** How far a pointer may travel and still count as a tap. The conventional ~10px. */
+    const TAP_SLOP_PX = 10;
+    /** The in-flight press, or null once it has been disqualified or consumed. */
+    let candidate: { id: number; x: number; y: number } | null = null;
+
+    const down = (event: PointerEvent) => {
       // EXCEPT the control that exists to start the voice. This listener is on capture,
       // so it runs BEFORE the chip's own click handler — without this guard, tapping
       // "Hear this" would clear the queue and then ask it to replay an empty queue,
       // and the one button whose entire job is to make audio happen would be the one
       // button that silently does nothing.
-      if ((event.target as Element | null)?.closest?.(".speak-chip")) return;
+      if ((event.target as Element | null)?.closest?.(".speak-chip")) {
+        candidate = null;
+        return;
+      }
+      candidate = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    };
+
+    const move = (event: PointerEvent) => {
+      if (candidate === null || event.pointerId !== candidate.id) return;
+      const travelled = Math.hypot(event.clientX - candidate.x, event.clientY - candidate.y);
+      // Moved: this is a scroll or a drag, and the voice keeps talking.
+      if (travelled > TAP_SLOP_PX) candidate = null;
+    };
+
+    const up = (event: PointerEvent) => {
+      if (candidate === null || event.pointerId !== candidate.id) return;
+      candidate = null;
       speechQueueRef.current?.clear();
     };
-    window.addEventListener("pointerdown", hush, true);
-    return () => window.removeEventListener("pointerdown", hush, true);
+
+    // A cancelled pointer (the browser took it for a gesture, the touch left the
+    // surface) is not a tap either.
+    const cancel = () => {
+      candidate = null;
+    };
+
+    const opts = { capture: true } as const;
+    window.addEventListener("pointerdown", down, opts);
+    window.addEventListener("pointermove", move, opts);
+    window.addEventListener("pointerup", up, opts);
+    window.addEventListener("pointercancel", cancel, opts);
+    return () => {
+      window.removeEventListener("pointerdown", down, opts);
+      window.removeEventListener("pointermove", move, opts);
+      window.removeEventListener("pointerup", up, opts);
+      window.removeEventListener("pointercancel", cancel, opts);
+    };
   }, []);
 
   const [closingRefusal, setClosingRefusal] = useState(false);

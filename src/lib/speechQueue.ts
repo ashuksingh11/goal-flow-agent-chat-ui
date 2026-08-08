@@ -98,12 +98,27 @@ export class SpeechQueue {
       this.pending = this.pending.filter((item) => priorityOf(item.payload.cue) > 0);
     }
 
-    // Rule 2: cut off what is speaking, but only for something that outranks it. Equal
-    // priority WAITS — two questions in a row are both worth hearing, and a plan
-    // summary must not truncate itself with its own approvals line.
-    if (this.current && incomingPriority > priorityOf(this.current.payload.cue)) {
-      this.stopCurrent();
-    }
+    /*
+     * Rule 2, AS AMENDED IN v11.11: NOTHING IS EVER CUT OFF MID-SENTENCE.
+     *
+     * This used to stop whatever was speaking as soon as something outranked it, so the
+     * plan landing would cut "now putting the week together" off in the middle. The
+     * argument was that the sentence had been overtaken by the event it described.
+     *
+     * Heard on a Hub, that is not what it sounds like. It sounds like the voice broke.
+     * A sentence chopped mid-word reads as a fault in the machine, and it costs more
+     * trust than a couple of seconds of slightly stale narration ever could.
+     *
+     * The staleness that argument was protecting against is still handled — by rule 3,
+     * below, which DROPS progress that has not started. The distinction is the whole
+     * point: a line that has not begun can be silently abandoned and nobody knows; a
+     * line already in the room has to be allowed to finish its sentence.
+     *
+     * So the plan now waits for the current utterance to end and speaks next — the sort
+     * below puts it at the front of the queue, so it is next regardless of what else is
+     * pending. The wait is bounded by how long the progress lines are, which is why
+     * they have to be short enough to fit the phase they narrate.
+     */
 
     this.pending.push(incoming);
     this.pending.sort((a, b) => priorityOf(b.payload.cue) - priorityOf(a.payload.cue) || a.seq - b.seq);

@@ -37,6 +37,13 @@ for (const [cue, rank] of Object.entries(PRIORITY)) {
 }
 check(/PRIORITY\[cue\] \?\? 0/.test(source),
   "an UNKNOWN cue must default to PROGRESS (0) — a future cue must not acquire the power to talk over a question by being unrecognised");
+// The model above is only as good as its agreement with the shipped module. This is the
+// check that would have caught the drift when rule 2 was reversed: the interrupt is gone
+// from push(), so the model must not simulate one either.
+check(!/incomingPriority > priorityOf\(this\.current/.test(source),
+  "push() must not interrupt what is speaking — v11.11 removed that, and this gate's own model was left asserting the opposite until it was caught");
+check(/this\.pending = this\.pending\.filter/.test(source),
+  "but rule 3 must remain: progress that has NOT started is still dropped, which is what keeps a stale line from ever beginning");
 check(/await whenEnded\(\)/.test(source),
   "the queue must wait for the audio to END, not for play() to resolve — play() reports in ~150ms and utterances run 4-10s, so draining on it is the two-voices bug");
 
@@ -49,7 +56,8 @@ function makeQueue() {
 function push(q, cue) {
   const p = priorityOf(cue);
   if (p > 0) q.pending = q.pending.filter((i) => priorityOf(i.cue) > 0);   // rule 3
-  if (q.current && p > priorityOf(q.current.cue)) q.current = null;         // rule 2
+  // rule 2 (v11.11): NOTHING is interrupted. What is already speaking finishes its
+  // sentence; priority decides who goes NEXT, via the sort below.
   q.pending.push({ cue, seq: q.seq++ });
   q.pending.sort((a, b) => priorityOf(b.cue) - priorityOf(a.cue) || a.seq - b.seq);
   drain(q);
@@ -71,12 +79,22 @@ check(q.pending.length === 1, "the second waits its turn rather than being lost"
 finish(q);
 check(q.current.cue === "working_plan", "and speaks when the first ends");
 
-// RULE 2 — the plan cuts off progress chatter.
+// RULE 2 (v11.11) — nothing is cut off mid-sentence; the plan goes NEXT, not NOW.
+//
+// This assertion used to be the exact opposite, and the reversal came from hearing it on
+// a Hub: a sentence chopped mid-word does not read as "overtaken by events", it reads as
+// the voice breaking. The staleness that justified the interrupt is still handled by
+// rule 3 — a line that has not STARTED is dropped and nobody knows. A line already in
+// the room gets to finish.
 q = makeQueue();
 push(q, "working_plan");
 push(q, "plan");
-check(q.current.cue === "plan",
-  "the PLAN interrupts 'now putting the week together' — that sentence has been overtaken by the event it was describing");
+check(q.current.cue === "working_plan",
+  "a sentence already being spoken is never cut off — a chopped word reads as a fault in the machine, which costs more than a few seconds of stale narration");
+check(q.pending[0].cue === "plan",
+  "and the plan is queued FIRST, so it is next the moment the current sentence ends");
+finish(q);
+check(q.current.cue === "plan", "then the plan speaks");
 
 // RULE 3 — queued progress is DROPPED, not deferred.
 q = makeQueue();
@@ -188,8 +206,26 @@ check(/onReplaced:\s*\(\)\s*=>\s*speechQueueRef\.current\?\.clear\(\)/.test(app)
 // --- barge-in must not eat its own button --------------------------------------------
 check(/closest\?\.\(["'`]\.speak-chip/.test(app),
   "barge-in must EXEMPT .speak-chip: the listener is on capture, so without this the tap clears the queue before the chip's own handler asks it to replay — and the one button whose job is to make audio happen silently does nothing");
-check(/pointerdown["']\s*,\s*hush\s*,\s*true\)/.test(app),
+check(/capture:\s*true/.test(app),
   "barge-in listens on the capture phase, so no component has to remember to hush");
+
+// v11.10 — a SCROLL is reading, not a decision, and must not silence the voice.
+//
+// Touch-scrolling begins with a pointerdown, so hushing on pointerdown alone silenced
+// the narration every time someone scrolled the plan — constant on a fridge with a
+// seven-day plan. It hid for two versions: desktop scrolling is a WHEEL event and fires
+// no pointerdown, and on the Hub the platform instantly restarted the audio this had
+// just stopped, so the stop was invisible underneath the repeat it caused.
+check(/TAP_SLOP_PX/.test(app),
+  "barge-in needs a movement threshold — intent is not knowable at pointerdown, because a press that becomes a scroll and a press that becomes a tap are the same event until one of them moves");
+check(/addEventListener\("pointerup"/.test(app) && /addEventListener\("pointermove"/.test(app),
+  "the decision must land on pointer-UP with pointermove able to disqualify it; that is the whole tap-versus-scroll test");
+check(/const up = \(event: PointerEvent\) => \{[\s\S]{0,220}speechQueueRef\.current\?\.clear\(\)/.test(app),
+  "and the queue must be cleared from the pointerUP handler, not from pointerdown");
+check(!/addEventListener\("pointerdown",\s*hush/.test(app),
+  "the old hush-on-pointerdown listener must stay gone");
+check(/pointercancel/.test(app),
+  "a cancelled pointer is not a tap either — the browser took it for a gesture");
 
 for (const f of failures) console.log(`  FAIL ${f}`);
 console.log(`gate 32 (speech queue): ${failures.length ? `FAIL: ${failures.length}` : "PASS"}`);
